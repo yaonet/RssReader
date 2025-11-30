@@ -45,6 +45,14 @@ builder.Services.AddRazorComponents()
 
 var app = builder.Build();
 
+// Apply database migrations
+using (var scope = app.Services.CreateScope())
+{
+    var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<RssReaderContext>>();
+    await using var context = await dbContextFactory.CreateDbContextAsync();
+    await context.Database.MigrateAsync();
+}
+
 // Initialize default settings
 using (var scope = app.Services.CreateScope())
 {
