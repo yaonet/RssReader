@@ -1,0 +1,179 @@
+@using RssReader.ViewModels
+@implements IAsyncDisposable
+
+@if (IsVisible)
+{
+    <div class="modal fade show d-block" 
+         tabindex="-1" 
+         style="background-color: rgba(0,0,0,0.5);"
+         @onclick="HandleBackdropClick"
+         @onkeydown="HandleKeyDown">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-content" @ref="modalContentRef">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteDialogTitle">@Title</h5>
+                    <button type="button" 
+                            class="btn-close" 
+                            @onclick="HandleCancel" 
+                            aria-label="Close"
+                            disabled="@IsProcessing"></button>
+                </div>
+                <div class="modal-body">
+                    @if (MessageContent != null)
+                    {
+                        @MessageContent
+                    }
+                    else
+                    {
+                        <p>@Message</p>
+                    }
+                    
+                    @if (Warning != null)
+                    {
+                        <AlertDisplay Alert="@Warning" Dismissible="false" />
+                    }
+                    else if (!string.IsNullOrEmpty(WarningMessage))
+                    {
+                        <AlertDisplay Alert="@(Alert.Warning(WarningMessage))" Dismissible="false" />
+                    }
+                    
+                    @if (ChildContent != null)
+                    {
+                        @ChildContent
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" 
+                            class="btn btn-secondary" 
+                            @onclick="HandleCancel"
+                            disabled="@IsProcessing">
+                        @CancelButtonText
+                    </button>
+                    <button type="button" 
+                            class="btn btn-danger" 
+                            @onclick="HandleConfirm"
+                            disabled="@IsProcessing">
+                        @if (IsProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        }
+                        @ConfirmButtonText
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference modalContentRef;
+    private IJSObjectReference? jsModule;
+    
+    [Parameter]
+    public bool IsVisible { get; set; }
+
+    [Parameter]
+    public string Title { get; set; } = "Confirm Delete";
+
+    [Parameter]
+    public string Message { get; set; } = "Are you sure you want to delete this item?";
+
+    [Parameter]
+    public RenderFragment? MessageContent { get; set; }
+
+    [Parameter]
+    public Alert? Warning { get; set; }
+
+    [Parameter]
+    public string? WarningMessage { get; set; }
+
+    [Parameter]
+    public string ConfirmButtonText { get; set; } = "Delete";
+
+    [Parameter]
+    public string CancelButtonText { get; set; } = "Cancel";
+
+    [Parameter]
+    public bool IsProcessing { get; set; }
+
+    [Parameter]
+    public bool CloseOnBackdropClick { get; set; } = false;
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; } = default!;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            jsModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/Shared/DeleteConfirmDialog.razor.js");
+        }
+
+        if (IsVisible && jsModule != null)
+        {
+            await jsModule.InvokeVoidAsync("focusModal", modalContentRef);
+        }
+    }
+
+    private async Task HandleConfirm()
+    {
+        if (!IsProcessing)
+        {
+            await OnConfirm.InvokeAsync();
+        }
+    }
+
+    private async Task HandleCancel()
+    {
+        if (!IsProcessing)
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    private async Task HandleBackdropClick()
+    {
+        if (CloseOnBackdropClick && !IsProcessing)
+        {
+            await HandleCancel();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (IsProcessing) return;
+
+        if (e.Key == "Escape")
+        {
+            await HandleCancel();
+        }
+        else if (e.Key == "Enter" && !e.ShiftKey && !e.CtrlKey && !e.AltKey)
+        {
+            await HandleConfirm();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (jsModule != null)
+        {
+            try
+            {
+                await jsModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

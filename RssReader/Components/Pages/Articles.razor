@@ -1,0 +1,395 @@
+@page "/"
+@page "/articles"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using RssReader.Models
+@using RssReader.ViewModels
+@using RssReader.Data
+@using RssReader.Services
+@using RssReader.Components.Shared
+@using RssReader.Components.Articles
+@implements IDisposable
+@inject IDbContextFactory<RssReader.Data.RssReaderContext> DbFactory
+@inject DataUpdateNotificationService NotificationService
+@inject ILogger<Articles> Logger
+
+<PageTitle>Articles</PageTitle>
+
+<h1>Articles</h1>
+
+<AlertDisplay @bind-Alert="_alert" />
+
+<div class="mb-3 row">
+    <div class="col-md-2 col-lg-2">
+        <input type="search" 
+               class="form-control" 
+               @bind="_titleFilter" 
+               @bind:event="oninput" 
+               placeholder="Search by article title or feed name" 
+               aria-label="Search articles by title or feed name" />
+    </div>
+    @if (!string.IsNullOrEmpty(_filterInfo))
+    {
+        <div class="col-md-6 col-lg-4 d-flex align-items-center">
+            <span class="text-muted me-2">
+                <i class="bi bi-funnel me-1"></i>@_filterInfo
+            </span>
+            <a href="/articles" class="btn btn-sm btn-outline-secondary">Clear</a>
+        </div>
+    }
+</div>
+
+@if (_isLoadingArticles)
+{
+    <div class="text-center my-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading articles...</span>
+        </div>
+    </div>
+}
+else if (!_articles.Any())
+{
+    <div class="alert alert-info" role="alert">
+        <i class="bi bi-info-circle me-2"></i>No articles yet. Add some feeds to see articles here.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <QuickGrid Class="table" Items="FilteredArticles" Pagination="_pagination">
+            <TemplateColumn Title="Feed" SortBy="@(GridSort<Article>.ByAscending(a => a.Feed != null ? a.Feed.Title : string.Empty))">
+                @if (context.Feed != null)
+                {
+                    <FeedIcon ImageUrl="@context.Feed.ImageUrl" Title="@context.Feed.Title" />
+                    <a href="@context.Feed.Link" target="_blank" rel="noopener noreferrer">@context.Feed.Title</a>
+                }
+                else
+                {
+                    <span class="text-muted">Unknown Feed</span>
+                }
+            </TemplateColumn>
+            <TemplateColumn Title="Title" SortBy="@(GridSort<Article>.ByAscending(a => a.Title))">
+                <button class="btn btn-link text-start p-0 text-decoration-none" 
+                        @onclick="() => ShowArticleContent(context)"
+                        style="color: inherit;"
+                        aria-label="@($"Read article: {context.Title}")">
+                    @context.Title
+                </button>
+            </TemplateColumn>
+            <TemplateColumn Title="">
+                <button class="btn btn-sm btn-link p-0 border-0" 
+                        @onclick="() => ToggleReadStatus(context)"
+                        title="@(context.IsRead ? "Mark as unread" : "Mark as read")"
+                        aria-label="@(context.IsRead ? "Mark as unread" : "Mark as read")">
+                    <i class="bi @(context.IsRead ? "bi-envelope-open icon-read" : "bi-envelope icon-unread")"></i>
+                </button>
+            </TemplateColumn>
+            <TemplateColumn Title="">
+                <button class="btn btn-sm btn-link p-0 border-0" 
+                        @onclick="() => ToggleFavoriteStatus(context)"
+                        title="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")"
+                        aria-label="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+                    <i class="bi @(context.IsFavorite ? "bi-star-fill icon-favorite-filled" : "bi-star icon-favorite")"></i>
+                </button>
+            </TemplateColumn>
+            <TemplateColumn Title="">
+                <a href="@context.Link" 
+                   target="_blank" 
+                   rel="noopener noreferrer" 
+                   class="btn btn-sm btn-link" 
+                   title="Read on source website"
+                   aria-label="@($"Read {context.Title} on source website")">
+                    <i class="bi bi-box-arrow-up-right icon-external-link"></i>
+                </a>
+            </TemplateColumn>
+            <PropertyColumn Property="@(a => a.PublishDate)" Format="yyyy-MM-dd HH:mm" Title="PublishDate" Sortable="true"/>
+        </QuickGrid>
+    </div>
+    <Paginator State="_pagination" />
+}
+
+<ArticleViewer Article="_selectedArticle"
+               IsVisible="@(_selectedArticle != null)"
+               OnClose="CloseArticleContent"
+               OnToggleRead="HandleToggleReadFromViewer"
+               OnToggleFavorite="HandleToggleFavoriteFromViewer" />
+
+@code {
+    private const int DefaultItemsPerPage = 30;
+    
+    private PaginationState _pagination = new PaginationState { ItemsPerPage = DefaultItemsPerPage };
+    private List<Article> _articles = new();
+    private string _titleFilter = string.Empty;
+    private string _filterInfo = string.Empty;
+    private int _currentCategoryId = -1;
+    private int _currentFeedId = -1;
+    private Article? _selectedArticle = null;
+    private Alert? _alert;
+    private bool _isLoadingArticles = true;
+    private bool _disposed = false;
+
+    [SupplyParameterFromQuery(Name = "categoryId")]
+    public int? CategoryId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "feedId")]
+    public int? FeedId { get; set; }
+
+    private IQueryable<Article> FilteredArticles =>
+        string.IsNullOrWhiteSpace(_titleFilter)
+            ? _articles.AsQueryable()
+            : _articles.AsQueryable().Where(a => 
+                (a.Title != null && a.Title.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)) ||
+                (a.Feed != null && a.Feed.Title != null && a.Feed.Title.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        NotificationService.OnFeedsUpdated += HandleFeedsUpdated;
+        NotificationService.OnCategoriesUpdated += HandleCategoriesUpdated;
+        
+        await LoadArticlesAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var newCategoryId = CategoryId ?? 0;
+        var newFeedId = FeedId ?? 0;
+        
+        if (_currentCategoryId != newCategoryId || _currentFeedId != newFeedId)
+        {
+            _currentCategoryId = newCategoryId;
+            _currentFeedId = newFeedId;
+            _titleFilter = string.Empty;
+            _pagination = new PaginationState { ItemsPerPage = DefaultItemsPerPage };
+            _alert = null;
+            await LoadArticlesAsync();
+        }
+    }
+
+    private async Task LoadArticlesAsync()
+    {
+        try
+        {
+            _isLoadingArticles = true;
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            IQueryable<Article> query;
+
+            if (FeedId.HasValue && FeedId.Value > 0)
+            {
+                query = context.Set<Article>()
+                    .Where(a => a.FeedId == FeedId.Value)
+                    .Include(a => a.Feed)
+                    .ThenInclude(f => f!.Category);
+                
+                var feed = await context.Feed
+                    .Include(f => f.Category)
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(f => f.Id == FeedId.Value);
+                
+                if (feed != null)
+                {
+                    _filterInfo = $"Feed: {feed.Title}";
+                    if (feed.Category != null)
+                    {
+                        _filterInfo += $" (Category: {feed.Category.Name})";
+                    }
+                }
+                else
+                {
+                    _filterInfo = "Feed not found";
+                    Logger.LogWarning("Feed with ID {FeedId} not found", FeedId.Value);
+                }
+            }
+            else if (CategoryId.HasValue && CategoryId.Value > 0)
+            {
+                query = context.Set<Article>()
+                    .Include(a => a.Feed)
+                    .ThenInclude(f => f!.Category)
+                    .Where(a => a.Feed!.CategoryId == CategoryId.Value);
+                
+                var category = await context.Category
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.Id == CategoryId.Value);
+                    
+                if (category != null)
+                {
+                    _filterInfo = $"Category: {category.Name}";
+                }
+                else
+                {
+                    _filterInfo = "Category not found";
+                    Logger.LogWarning("Category with ID {CategoryId} not found", CategoryId.Value);
+                }
+            }
+            else
+            {
+                query = context.Set<Article>()
+                    .Include(a => a.Feed)
+                    .ThenInclude(f => f!.Category);
+                
+                _filterInfo = string.Empty;
+            }
+
+            _articles = await query
+                .OrderByDescending(a => a.PublishDate)
+                .AsNoTracking()
+                .ToListAsync();
+                
+            Logger.LogInformation("Loaded {ArticleCount} articles", _articles.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading articles. CategoryId: {CategoryId}, FeedId: {FeedId}", CategoryId, FeedId);
+            _alert = Alert.Error($"Failed to load articles: {ex.Message}");
+            _articles = new List<Article>();
+        }
+        finally
+        {
+            _isLoadingArticles = false;
+        }
+    }
+
+    private async Task ShowArticleContent(Article article)
+    {
+        _selectedArticle = article;
+        
+        if (!article.IsRead)
+        {
+            await MarkArticleAsRead(article);
+        }
+    }
+
+    private void CloseArticleContent()
+    {
+        _selectedArticle = null;
+    }
+
+    private async Task MarkArticleAsRead(Article article)
+    {
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            await context.Set<Article>()
+                .Where(a => a.Id == article.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, true));
+            
+            article.IsRead = true;
+            
+            Logger.LogInformation("Marked article as read: {ArticleId}", article.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to mark article as read: {ArticleId}", article.Id);
+            _alert = Alert.Error($"Failed to mark article as read: {ex.Message}");
+        }
+    }
+
+    private async Task ToggleReadStatus(Article article)
+    {
+        try
+        {
+            var newStatus = !article.IsRead;
+            
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            await context.Set<Article>()
+                .Where(a => a.Id == article.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, newStatus));
+            
+            article.IsRead = newStatus;
+            
+            Logger.LogInformation("Toggled read status for article {ArticleId} to {IsRead}", article.Id, newStatus);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update read status for article: {ArticleId}", article.Id);
+            _alert = Alert.Error($"Failed to update read status: {ex.Message}");
+        }
+    }
+
+    private async Task ToggleFavoriteStatus(Article article)
+    {
+        try
+        {
+            var newStatus = !article.IsFavorite;
+            
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            await context.Set<Article>()
+                .Where(a => a.Id == article.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsFavorite, newStatus));
+            
+            article.IsFavorite = newStatus;
+            
+            Logger.LogInformation("Toggled favorite status for article {ArticleId} to {IsFavorite}", article.Id, newStatus);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update favorite status for article: {ArticleId}", article.Id);
+            _alert = Alert.Error($"Failed to update favorite status: {ex.Message}");
+        }
+    }
+
+    private async Task HandleToggleReadFromViewer(Article article)
+    {
+        await ToggleReadStatus(article);
+    }
+
+    private async Task HandleToggleFavoriteFromViewer(Article article)
+    {
+        await ToggleFavoriteStatus(article);
+    }
+
+    private async void HandleFeedsUpdated()
+    {
+        if (_disposed) return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadArticlesAsync();
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Component disposed
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling feeds updated event");
+        }
+    }
+
+    private async void HandleCategoriesUpdated()
+    {
+        if (_disposed) return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadArticlesAsync();
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Component disposed
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling categories updated event");
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        NotificationService.OnFeedsUpdated -= HandleFeedsUpdated;
+        NotificationService.OnCategoriesUpdated -= HandleCategoriesUpdated;
+    }
+}

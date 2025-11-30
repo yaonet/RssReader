@@ -1,0 +1,253 @@
+﻿@page "/categories"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using RssReader.Models
+@using RssReader.Data
+@using RssReader.Services
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+@using System.ComponentModel.DataAnnotations;
+@inject IDbContextFactory<RssReader.Data.RssReaderContext> DbFactory
+@inject DataUpdateNotificationService NotificationService
+
+<PageTitle>Categories</PageTitle>
+
+<h1>Categories</h1>
+
+<AlertDisplay @bind-Alert="alert" />
+
+<div class="row">
+    <div class="col-md-4">
+        <EditForm method="post" Model="categoryInput" OnValidSubmit="AddCategory" FormName="create" Enhance>
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" role="alert" />
+            <div class="mb-3">
+                <div class="input-group">
+                    <InputText id="categoryName" @bind-Value="categoryInput.CategoryName" class="form-control" aria-required="true" placeholder="Enter category name" />
+                    <button type="submit" class="btn btn-primary" disabled="@isLoading">
+                        @if (isLoading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        }
+                        Create
+                    </button>
+                </div>
+                <ValidationMessage For="() => categoryInput.CategoryName" class="text-danger" />
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@if (isLoadingCategories)
+{
+    <div class="text-center my-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading categories...</span>
+        </div>
+    </div>
+}
+else if (!allCategories.Any())
+{
+    <div class="alert alert-info" role="alert">
+        <i class="bi bi-info-circle me-2"></i>No categories yet. Create your first category above.
+    </div>
+}
+else
+{
+    <QuickGrid Class="table" Items="allCategories.AsQueryable()">
+        <PropertyColumn Property="category => category.Name" Title="Category" />
+        <TemplateColumn Title="Actions">
+            <button class="btn btn-sm btn-danger" 
+                    @onclick="() => DeleteCategory(context)"
+                    @onclick:stopPropagation="true"
+                    disabled="@isDeleting"
+                    aria-label="@($"Delete category {context.Name}")">
+               Delete
+            </button>
+        </TemplateColumn>
+    </QuickGrid>
+}
+
+<DeleteConfirmDialog IsVisible="@showDeleteConfirmation"
+                     Title="Confirm Delete"
+                     Message="@GetDeleteMessage()"
+                     Warning="@GetWarning()"
+                     IsProcessing="@isDeleting"
+                     OnConfirm="ConfirmDelete"
+                     OnCancel="CancelDelete" />
+
+@code {
+    [SupplyParameterFromForm]
+    private InputModel categoryInput { get; set; } = default!;
+
+    private Alert? alert;
+    private List<Category> allCategories = new();
+    private bool showDeleteConfirmation = false;
+    private Category? categoryToDelete = null;
+    private int feedCount = 0;
+    private bool isDeleting = false;
+    private bool isLoading = false;
+    private bool isLoadingCategories = true;
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Category name is required.")]
+        [StringLength(30, MinimumLength = 2, ErrorMessage = "Category name must be between 2 and 30 characters.")]
+        public string? CategoryName { get; set; }
+    }
+
+    protected override void OnInitialized()
+    {
+        categoryInput ??= new InputModel();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {  
+        await LoadCategoriesAsync();
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        try
+        {
+            isLoadingCategories = true;
+            await using var context = await DbFactory.CreateDbContextAsync();
+            allCategories = await context.Category.OrderBy(c => c.Name).ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            alert = Alert.Error($"Failed to load categories: {ex.Message}");
+        }
+        finally
+        {
+            isLoadingCategories = false;
+        }
+    }
+
+    private async Task AddCategory()
+    {
+        try
+        {
+            isLoading = true;
+            await using var context = await DbFactory.CreateDbContextAsync();
+            var name = categoryInput.CategoryName!.Trim();
+
+            var exists = await context.Category.AnyAsync(c => c.Name!.ToLower() == name.ToLower());
+            if (exists)
+            {
+                alert = Alert.Error($"Category '{name}' already exists.");
+                return;
+            }
+
+            context.Category.Add(new Category
+            {
+                Name = name
+            });
+
+            await context.SaveChangesAsync();
+            
+            alert = Alert.Success($"Category '{name}' created successfully.");
+            categoryInput.CategoryName = string.Empty;
+            
+            await LoadCategoriesAsync();
+            
+            NotificationService.NotifyCategoriesUpdated();
+        }
+        catch (DbUpdateException)
+        {
+            alert = Alert.Error($"A category with this name already exists or a database constraint was violated.");
+        }
+        catch (Exception ex)
+        {
+            alert = Alert.Error($"Failed to create category: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task DeleteCategory(Category category)
+    {
+        categoryToDelete = category;
+        
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            feedCount = await context.Feed.CountAsync(f => f.CategoryId == category.Id);
+            
+            showDeleteConfirmation = true;
+        }
+        catch (Exception ex)
+        {
+            alert = Alert.Error($"Failed to check category feeds: {ex.Message}");
+            ResetDeleteState();
+        }
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (categoryToDelete == null) return;
+
+        isDeleting = true;
+        
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            var category = await context.Category.FindAsync(categoryToDelete.Id);
+            if (category != null)
+            {
+                context.Category.Remove(category);
+                await context.SaveChangesAsync();
+                
+                alert = Alert.Success($"Category '{categoryToDelete.Name}' deleted successfully.");
+                
+                await LoadCategoriesAsync();
+                
+                NotificationService.NotifyCategoriesUpdated();
+            }
+            else
+            {
+                alert = Alert.Error($"Category not found. It may have been already deleted.");
+            }
+        }
+        catch (Exception ex)
+        {
+            alert = Alert.Error($"Error deleting category: {ex.Message}");
+        }
+        finally
+        {
+            isDeleting = false;
+            ResetDeleteState();
+        }
+    }
+
+    private void CancelDelete()
+    {
+        ResetDeleteState();
+    }
+
+    private void ResetDeleteState()
+    {
+        showDeleteConfirmation = false;
+        categoryToDelete = null;
+        feedCount = 0;
+    }
+
+    private string GetDeleteMessage()
+    {
+        return categoryToDelete != null 
+            ? $"Are you sure you want to delete the category '{categoryToDelete.Name}'?" 
+            : string.Empty;
+    }
+
+    private Alert? GetWarning()
+    {
+        if (categoryToDelete == null || feedCount == 0)
+            return null;
+
+        return Alert.Warning($"This category has {feedCount} feed(s). Deleting it will also remove all associated feeds and articles.");
+    }
+}

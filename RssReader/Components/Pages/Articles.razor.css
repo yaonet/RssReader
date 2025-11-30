@@ -1,0 +1,23 @@
+.icon-read {
+    color: currentColor;
+}
+
+.icon-unread {
+    color: red;
+}
+
+.icon-favorite-filled {
+    color: gold;
+}
+
+.icon-favorite {
+    color: currentColor;
+}
+
+.icon-external-link {
+    color: currentColor;
+}
+
+::deep .table td {
+    vertical-align: middle;
+}

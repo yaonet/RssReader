@@ -1,0 +1,523 @@
+﻿@page "/feeds"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using RssReader.Models
+@using RssReader.ViewModels
+@using RssReader.Data
+@using RssReader.Services
+@using RssReader.Components.Feeds
+@using RssReader.Components.Shared
+@inject IDbContextFactory<RssReaderContext> DbFactory
+@inject DataUpdateNotificationService NotificationService
+@inject OpmlImportService OpmlService
+@inject FeedService FeedService
+@inject ILogger<Feeds> Logger
+
+<PageTitle>Feeds</PageTitle>
+
+<h1>Feeds</h1>
+
+<div class="mb-3">
+    <ul class="nav nav-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(activeTab == "add" ? "active" : "")" 
+                    @onclick="@(() => SwitchTab("add"))" 
+                    type="button">
+                Add Feed
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(activeTab == "import" ? "active" : "")" 
+                    @onclick="@(() => SwitchTab("import"))" 
+                    type="button">
+                Import OPML
+            </button>
+        </li>
+    </ul>
+</div>
+
+@if (activeTab == "add")
+{
+    <AddFeedForm @ref="addFeedForm"
+                 Categories="_categories"
+                 OnFeedAdded="HandleAddFeed"
+                 @bind-Alert="feedAlert" />
+}
+else
+{
+    <OpmlImportForm Categories="_categories"
+                    OnImportRequested="HandleOpmlImport"
+                    @bind-Alert="importAlert"
+                    Progress="@importProgress"
+                    IsImporting="@isImporting" />
+}
+
+<hr/>
+
+@if (_isLoadingFeeds)
+{
+    <div class="text-center my-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading feeds...</span>
+        </div>
+    </div>
+}
+else if (!_allFeeds.Any())
+{
+    <div class="alert alert-info" role="alert">
+        <i class="bi bi-info-circle me-2"></i>No feeds yet. Add your first feed above.
+    </div>
+}
+else
+{
+    <div>
+        <QuickGrid Class="table" Items="_allFeeds.AsQueryable()">
+            <TemplateColumn Title="Category" Context="feed" SortBy="@(GridSort<Feed>.ByAscending(f => f.Category != null ? f.Category.Name : "Uncategorized"))">
+                @(feed.Category?.Name ?? "Uncategorized")
+            </TemplateColumn>
+            <TemplateColumn Title="Title" Context="feed" SortBy="@(GridSort<Feed>.ByAscending(f => f.Title))">
+                <div class="d-flex align-items-center">
+                    <FeedIcon ImageUrl="@feed.ImageUrl" Title="@feed.Title" CssClass="me-2" />
+                    <a href="@feed.Link" target="_blank">@feed.Title</a>
+                </div>
+            </TemplateColumn>
+            <TemplateColumn Title="FeedUrl" Context="feed">
+                <a href="@feed.Url" target="_blank">@feed.Url</a>
+            </TemplateColumn>
+            <PropertyColumn Property="feed => feed.LastUpdated" Sortable="true" />
+            <TemplateColumn Title="Actions" Context="feed">
+                <button class="btn btn-danger btn-sm" 
+                        @onclick="() => ShowDeleteConfirmation(feed)" 
+                        disabled="@isDeleting"
+                        aria-label="@($"Delete feed {feed.Title}")">
+                    @if (isDeleting && deletingFeedId == feed.Id)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <span>Delete</span>
+                    }
+                </button>
+            </TemplateColumn>
+        </QuickGrid>
+    </div>
+}
+
+<DeleteConfirmDialog IsVisible="@showDeleteDialog"
+                     Title="Confirm Delete"
+                     Message="@GetDeleteMessage()"
+                     Warning="@(Alert.Warning("This will also delete all associated articles."))"
+                     IsProcessing="@isDeleting"
+                     OnConfirm="ConfirmDelete"
+                     OnCancel="CancelDelete" />
+
+@code {
+    private const long MaxOpmlFileSize = 10 * 1024 * 1024;
+    private const int MaxArticlesOnImport = 10;
+    
+    private List<Category> _categories = new();
+    private List<Feed> _allFeeds = new();
+    private string activeTab = "add";
+    
+    private bool isDeleting = false;
+    private int? deletingFeedId = null;
+    private bool showDeleteDialog = false;
+    private Feed? feedToDelete = null;
+
+    private bool isImporting = false;
+    private OpmlImportForm.ImportProgress? importProgress;
+
+    private Alert? feedAlert;
+    private Alert? importAlert;
+    
+    private AddFeedForm? addFeedForm;
+    private bool _isLoadingFeeds = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCategoriesAsync();
+        await LoadFeedsAsync();
+    }
+
+    private void SwitchTab(string tab)
+    {
+        activeTab = tab;
+        ClearAlerts();
+    }
+
+    private void ClearAlerts()
+    {
+        feedAlert = null;
+        importAlert = null;
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            _categories = await context.Category
+                .OrderBy(c => c.Name)
+                .AsNoTracking()
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading categories");
+            _categories = new List<Category>();
+        }
+    }
+
+    private async Task LoadFeedsAsync()
+    {
+        try
+        {
+            _isLoadingFeeds = true;
+            await using var context = await DbFactory.CreateDbContextAsync();
+            _allFeeds = await context.Feed
+                .Include(f => f.Category)
+                .AsNoTracking()
+                .OrderByDescending(f => f.LastUpdated)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading feeds");
+            _allFeeds = new List<Feed>();
+        }
+        finally
+        {
+            _isLoadingFeeds = false;
+        }
+    }
+
+    private async Task HandleAddFeed()
+    {
+        if (addFeedForm == null) return;
+
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            var input = addFeedForm.GetInput();
+            var url = input.Url!.Trim();
+
+            var exists = await context.Feed.AnyAsync(f => f.Url == url);
+            if (exists)
+            {
+                feedAlert = Alert.Error($"Feed '{url}' already exists.");
+                return;
+            }
+
+            var newFeed = await FeedService.CreateFeedFromUrlAsync(url, input.SelectedCategoryId);
+            
+            context.Feed.Add(newFeed);
+            await context.SaveChangesAsync();
+
+            feedAlert = Alert.Success($"Feed '{newFeed.Title}' added successfully!");
+            addFeedForm.ResetInput();
+
+            await LoadFeedsAsync();
+            NotificationService.NotifyFeedsUpdated();
+            
+            Logger.LogInformation("Successfully added feed: {FeedTitle} ({FeedUrl})", newFeed.Title, url);
+        }
+        catch (UriFormatException ex)
+        {
+            Logger.LogWarning(ex, "Invalid URL format: {Url}", addFeedForm.GetInput().Url);
+            feedAlert = Alert.Error("Invalid URL format.");
+        }
+        catch (HttpRequestException ex)
+        {
+            Logger.LogWarning(ex, "Unable to connect to feed URL: {Url}", addFeedForm.GetInput().Url);
+            feedAlert = Alert.Error("Unable to connect to the feed URL. Please check your internet connection.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error adding feed: {Url}", addFeedForm.GetInput().Url);
+            feedAlert = Alert.Error($"An error occurred: {ex.Message}");
+        }
+    }
+
+    private async Task HandleOpmlImport(OpmlImportForm.OpmlImportArgs args)
+    {
+        importAlert = null;
+        isImporting = true;
+        importProgress = null;
+
+        try
+        {
+            using var stream = args.File.OpenReadStream(maxAllowedSize: MaxOpmlFileSize);
+            var parseResult = await OpmlService.ParseOpmlFileAsync(stream);
+
+            if (!parseResult.Success)
+            {
+                Logger.LogWarning("OPML parse failed: {ErrorMessage}", parseResult.ErrorMessage);
+                importAlert = Alert.Error(parseResult.ErrorMessage!);
+                return;
+            }
+
+            if (!parseResult.Feeds.Any())
+            {
+                importAlert = Alert.Warning("No feeds found in the OPML file.");
+                return;
+            }
+
+            Logger.LogInformation("Starting OPML import with {FeedCount} feeds", parseResult.Feeds.Count);
+
+            importProgress = new OpmlImportForm.ImportProgress
+            {
+                Total = parseResult.Feeds.Count
+            };
+
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            var categoryCache = BuildCategoryCacheFromMemory();
+            var newCategoriesCreated = false;
+
+            foreach (var opmlFeed in parseResult.Feeds)
+            {
+                var categoryCreated = await ProcessOpmlFeedAsync(context, opmlFeed, args.DefaultCategoryId, categoryCache);
+                if (categoryCreated)
+                {
+                    newCategoriesCreated = true;
+                }
+            }
+
+            importAlert = Alert.Success(
+                $"Import completed! Successfully imported {importProgress.Imported} feeds. " +
+                $"Skipped: {importProgress.Skipped}, Failed: {importProgress.Failed}");
+
+            Logger.LogInformation(
+                "OPML import completed. Imported: {Imported}, Skipped: {Skipped}, Failed: {Failed}",
+                importProgress.Imported, importProgress.Skipped, importProgress.Failed);
+
+            await LoadCategoriesAsync();
+            await LoadFeedsAsync();
+
+            await InvokeAsync(() =>
+            {
+                if (newCategoriesCreated)
+                {
+                    NotificationService.NotifyCategoriesUpdated();
+                }
+                NotificationService.NotifyFeedsUpdated();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error during OPML import");
+            importAlert = Alert.Error($"An error occurred while importing: {ex.Message}");
+        }
+        finally
+        {
+            isImporting = false;
+        }
+    }
+
+    private Dictionary<string, int> BuildCategoryCacheFromMemory()
+    {
+        var cache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var category in _categories)
+        {
+            if (category.Name != null)
+            {
+                cache[category.Name] = category.Id;
+            }
+        }
+        return cache;
+    }
+
+    private async Task<bool> ProcessOpmlFeedAsync(
+        RssReaderContext context, 
+        OpmlImportService.OpmlFeed opmlFeed, 
+        int defaultCategoryId,
+        Dictionary<string, int> categoryCache)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(opmlFeed.XmlUrl))
+            {
+                Logger.LogWarning("Skipping feed without XmlUrl. Title: {Title}", opmlFeed.Title);
+                importProgress!.Skipped++;
+                await InvokeAsync(StateHasChanged);
+                return false;
+            }
+
+            var exists = await context.Feed.AnyAsync(f => f.Url == opmlFeed.XmlUrl);
+            if (exists)
+            {
+                Logger.LogInformation("Skipping duplicate feed: {Title} ({Url})", opmlFeed.Title, opmlFeed.XmlUrl);
+                importProgress!.Skipped++;
+                await InvokeAsync(StateHasChanged);
+                return false;
+            }
+
+            Logger.LogInformation("Processing feed: {Title} (Category: {Category}, Url: {Url})", 
+                opmlFeed.Title, opmlFeed.Category ?? "(none)", opmlFeed.XmlUrl);
+
+            var result = await ResolveCategoryIdAsync(context, opmlFeed.Category, defaultCategoryId, categoryCache);
+            
+            if (result.CategoryId == 0)
+            {
+                Logger.LogWarning("Failed to resolve category for feed: {FeedUrl}, Category: {Category}", 
+                    opmlFeed.XmlUrl, opmlFeed.Category);
+                importProgress!.Failed++;
+                await InvokeAsync(StateHasChanged);
+                return false;
+            }
+
+            Logger.LogDebug("Fetching feed content from: {Url} for category ID: {CategoryId}", 
+                opmlFeed.XmlUrl, result.CategoryId);
+
+            var newFeed = await FeedService.CreateFeedFromUrlAsync(opmlFeed.XmlUrl, result.CategoryId, maxArticles: MaxArticlesOnImport);
+            
+            if (!string.IsNullOrEmpty(opmlFeed.Title))
+            {
+                newFeed.Title = opmlFeed.Title;
+            }
+            
+            if (!string.IsNullOrEmpty(opmlFeed.HtmlUrl))
+            {
+                newFeed.Link = opmlFeed.HtmlUrl;
+            }
+
+            context.Feed.Add(newFeed);
+            await context.SaveChangesAsync();
+
+            Logger.LogInformation("Successfully imported feed: {Title} to category ID: {CategoryId}", 
+                newFeed.Title, result.CategoryId);
+
+            importProgress!.Imported++;
+            await InvokeAsync(StateHasChanged);
+            
+            return result.CategoryCreated;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error importing feed: {Title} ({FeedUrl}), Category: {Category}. Error: {ErrorMessage}", 
+                opmlFeed.Title, opmlFeed.XmlUrl, opmlFeed.Category ?? "(none)", ex.Message);
+            importProgress!.Failed++;
+            await InvokeAsync(StateHasChanged);
+            return false;
+        }
+    }
+
+    private async Task<(int CategoryId, bool CategoryCreated)> ResolveCategoryIdAsync(
+        RssReaderContext context,
+        string? categoryName,
+        int defaultCategoryId,
+        Dictionary<string, int> categoryCache)
+    {
+        if (string.IsNullOrEmpty(categoryName))
+        {
+            Logger.LogDebug("No category name provided, using default category ID: {DefaultCategoryId}", defaultCategoryId);
+            return (defaultCategoryId, false);
+        }
+
+        if (categoryCache.TryGetValue(categoryName, out var existingCategoryId))
+        {
+            Logger.LogDebug("Found category '{CategoryName}' in cache with ID: {CategoryId}", categoryName, existingCategoryId);
+            return (existingCategoryId, false);
+        }
+
+        var existingCategory = await context.Category
+            .FirstOrDefaultAsync(c => c.Name != null && c.Name.ToLower() == categoryName.ToLower());
+        
+        if (existingCategory != null)
+        {
+            categoryCache[categoryName] = existingCategory.Id;
+            
+            if (!_categories.Any(c => c.Id == existingCategory.Id))
+            {
+                _categories.Add(existingCategory);
+            }
+            
+            Logger.LogInformation("Found existing category in database: {CategoryName} (ID: {CategoryId})", 
+                categoryName, existingCategory.Id);
+            
+            return (existingCategory.Id, false);
+        }
+
+        var newCategory = new Category { Name = categoryName };
+        context.Category.Add(newCategory);
+        await context.SaveChangesAsync();
+
+        categoryCache[categoryName] = newCategory.Id;
+        
+        _categories.Add(new Category 
+        { 
+            Id = newCategory.Id, 
+            Name = newCategory.Name 
+        });
+        
+        Logger.LogInformation("Created new category: {CategoryName} (ID: {CategoryId})", categoryName, newCategory.Id);
+        
+        return (newCategory.Id, true);
+    }
+
+    private void ShowDeleteConfirmation(Feed feed)
+    {
+        feedToDelete = feed;
+        showDeleteDialog = true;
+        ClearAlerts();
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteDialog = false;
+        feedToDelete = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (feedToDelete == null) return;
+
+        isDeleting = true;
+        deletingFeedId = feedToDelete.Id;
+
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            var feed = await context.Feed.FindAsync(feedToDelete.Id);
+
+            if (feed != null)
+            {
+                context.Feed.Remove(feed);
+                await context.SaveChangesAsync();
+
+                feedAlert = Alert.Success($"Feed '{feedToDelete.Title}' deleted successfully!");
+                await LoadFeedsAsync();
+                
+                NotificationService.NotifyFeedsUpdated();
+                
+                Logger.LogInformation("Successfully deleted feed: {FeedTitle} (ID: {FeedId})", feedToDelete.Title, feedToDelete.Id);
+            }
+            else
+            {
+                Logger.LogWarning("Attempted to delete non-existent feed: {FeedId}", feedToDelete.Id);
+                feedAlert = Alert.Error("Feed not found.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting feed: {FeedId}", feedToDelete.Id);
+            feedAlert = Alert.Error($"An error occurred while deleting the feed: {ex.Message}");
+        }
+        finally
+        {
+            isDeleting = false;
+            deletingFeedId = null;
+            feedToDelete = null;
+            showDeleteDialog = false;
+        }
+    }
+
+    private string GetDeleteMessage()
+    {
+        return feedToDelete != null 
+            ? $"Are you sure you want to delete the feed {feedToDelete.Title}?" 
+            : string.Empty;
+    }
+}

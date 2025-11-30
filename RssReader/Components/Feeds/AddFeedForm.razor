@@ -1,0 +1,96 @@
+@using RssReader.Models
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+@using System.ComponentModel.DataAnnotations
+
+<div class="row">
+    <div class="col-md-6">
+        <EditForm method="post" Model="Input" OnValidSubmit="OnSubmit" FormName="create" Enhance>
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" role="alert" />
+            
+            <AlertDisplay @bind-Alert="Alert" />
+            
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <InputSelect id="category" @bind-Value="Input.SelectedCategoryId" class="form-control" disabled="@IsLoading">
+                        <option value="0">Select a category</option>
+                        @foreach (var category in Categories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => Input.SelectedCategoryId" class="text-danger" />
+                </div>
+                <div class="col-md-5">
+                    <InputText id="url" @bind-Value="Input.Url" class="form-control" placeholder="https://example.com/feed" disabled="@IsLoading" />
+                    <ValidationMessage For="() => Input.Url" class="text-danger" />
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100" disabled="@IsLoading">
+                        @if (IsLoading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                            <span>Adding...</span>
+                        }
+                        else
+                        {
+                            <span>Add Feed</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public List<Category> Categories { get; set; } = new();
+
+    [Parameter]
+    public EventCallback OnFeedAdded { get; set; }
+
+    [Parameter]
+    public Alert? Alert { get; set; }
+
+    [Parameter]
+    public EventCallback<Alert?> AlertChanged { get; set; }
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    private bool IsLoading { get; set; }
+
+    private async Task OnSubmit()
+    {
+        IsLoading = true;
+        await AlertChanged.InvokeAsync(null);
+
+        try
+        {
+            await OnFeedAdded.InvokeAsync();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    public InputModel GetInput() => Input;
+
+    public void ResetInput()
+    {
+        Input = new InputModel();
+    }
+
+    public sealed class InputModel
+    {
+        [Required]
+        [Url]
+        public string? Url { get; set; }
+
+        [Range(1, int.MaxValue, ErrorMessage = "Please select a category.")]
+        public int SelectedCategoryId { get; set; }
+    }
+}

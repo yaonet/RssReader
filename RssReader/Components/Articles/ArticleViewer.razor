@@ -1,0 +1,291 @@
+@using RssReader.Models
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+@using Ganss.Xss
+@inject ILogger<ArticleViewer> Logger
+
+@if (Article != null && IsVisible)
+{
+    <div class="modal fade show d-block" 
+         tabindex="-1" 
+         style="background-color: rgba(0,0,0,0.6);"
+         @onclick="HandleBackdropClick"
+         @onkeydown="HandleKeyDown"
+         role="dialog"
+         aria-labelledby="articleModalTitle"
+         aria-modal="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered" @onclick:stopPropagation="true">
+            <div class="modal-content article-modal">
+                <div class="modal-header border-bottom">
+                    <div class="w-100">
+                        <h3 class="modal-title article-title mb-2" id="articleModalTitle">@Article.Title</h3>
+                        <div class="article-meta d-flex flex-wrap gap-3 text-muted small">
+                            @if (Article.Feed != null)
+                            {
+                                <span class="d-flex align-items-center">
+                                    <FeedIcon ImageUrl="@Article.Feed.ImageUrl" 
+                                              Title="@Article.Feed.Title"
+                                              CssClass="me-1" />
+                                    <a href="@Article.Feed.Link" 
+                                       target="_blank" 
+                                       rel="noopener noreferrer" 
+                                       class="text-decoration-none">
+                                        @Article.Feed.Title
+                                    </a>
+                                </span>
+                            }
+                            @if (!string.IsNullOrEmpty(Article.Author))
+                            {
+                                <span>
+                                    <i class="bi bi-person me-1"></i>@Article.Author
+                                </span>
+                            }
+                            <span>
+                                <i class="bi bi-clock me-1"></i>@Article.PublishDate.ToString("yyyy-MM-dd HH:mm")
+                            </span>
+                            @if (!string.IsNullOrEmpty(Article.Link))
+                            {
+                                <span>
+                                    <a href="@Article.Link" 
+                                       target="_blank" 
+                                       rel="noopener noreferrer"
+                                       class="text-decoration-none">
+                                        <i class="bi bi-box-arrow-up-right me-1"></i>View Original
+                                    </a>
+                                </span>
+                            }
+                        </div>
+                    </div>
+                    <button type="button" 
+                            class="btn-close ms-3" 
+                            @onclick="HandleClose" 
+                            aria-label="Close"></button>
+                </div>
+                <div class="modal-body article-body p-4 p-md-5">
+                    <div class="article-content">
+                        @if (!string.IsNullOrEmpty(Article.Content))
+                        {
+                            @((MarkupString)SanitizeHtml(Article.Content))
+                        }
+                        else
+                        {
+                            <div class="text-center py-5">
+                                <i class="bi bi-file-earmark-text text-muted" style="font-size: 3rem;"></i>
+                                <p class="text-muted mt-3">No content available for this article.</p>
+                                @if (!string.IsNullOrEmpty(Article.Link))
+                                {
+                                    <a href="@Article.Link" 
+                                       target="_blank" 
+                                       rel="noopener noreferrer"
+                                       class="btn btn-primary">
+                                        <i class="bi bi-box-arrow-up-right me-2"></i>Read on Source Website
+                                    </a>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer border-top bg-light">
+                    <div class="d-flex justify-content-between w-100 align-items-center">
+                        <div class="btn-group">
+                            <button type="button" 
+                                    class="btn btn-sm @(Article.IsRead ? "btn-outline-secondary" : "btn-outline-primary")" 
+                                    @onclick="HandleToggleRead"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi @(Article.IsRead ? "bi-envelope-open" : "bi-envelope") me-1"></i>
+                                @(Article.IsRead ? "Mark Unread" : "Mark Read")
+                            </button>
+                            <button type="button" 
+                                    class="btn btn-sm @(Article.IsFavorite ? "btn-warning" : "btn-outline-warning")" 
+                                    @onclick="HandleToggleFavorite"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi @(Article.IsFavorite ? "bi-star-fill" : "bi-star") me-1"></i>
+                                @(Article.IsFavorite ? "Favorited" : "Favorite")
+                            </button>
+                        </div>
+                        <button type="button" 
+                                class="btn btn-secondary" 
+                                @onclick="HandleClose">
+                            <i class="bi bi-x-lg me-1"></i>Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly HtmlSanitizer _htmlSanitizer = new();
+
+    [Parameter, EditorRequired]
+    public Article? Article { get; set; }
+
+    [Parameter]
+    public bool IsVisible { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public EventCallback<Article> OnToggleRead { get; set; }
+
+    [Parameter]
+    public EventCallback<Article> OnToggleFavorite { get; set; }
+
+    protected override void OnInitialized()
+    {
+        ConfigureHtmlSanitizer();
+    }
+
+    private void ConfigureHtmlSanitizer()
+    {
+        _htmlSanitizer.AllowedTags.Clear();
+        _htmlSanitizer.AllowedTags.Add("p");
+        _htmlSanitizer.AllowedTags.Add("br");
+        _htmlSanitizer.AllowedTags.Add("strong");
+        _htmlSanitizer.AllowedTags.Add("b");
+        _htmlSanitizer.AllowedTags.Add("em");
+        _htmlSanitizer.AllowedTags.Add("i");
+        _htmlSanitizer.AllowedTags.Add("u");
+        _htmlSanitizer.AllowedTags.Add("a");
+        _htmlSanitizer.AllowedTags.Add("img");
+        _htmlSanitizer.AllowedTags.Add("ul");
+        _htmlSanitizer.AllowedTags.Add("ol");
+        _htmlSanitizer.AllowedTags.Add("li");
+        _htmlSanitizer.AllowedTags.Add("h1");
+        _htmlSanitizer.AllowedTags.Add("h2");
+        _htmlSanitizer.AllowedTags.Add("h3");
+        _htmlSanitizer.AllowedTags.Add("h4");
+        _htmlSanitizer.AllowedTags.Add("h5");
+        _htmlSanitizer.AllowedTags.Add("h6");
+        _htmlSanitizer.AllowedTags.Add("blockquote");
+        _htmlSanitizer.AllowedTags.Add("code");
+        _htmlSanitizer.AllowedTags.Add("pre");
+        _htmlSanitizer.AllowedTags.Add("div");
+        _htmlSanitizer.AllowedTags.Add("span");
+        _htmlSanitizer.AllowedTags.Add("table");
+        _htmlSanitizer.AllowedTags.Add("thead");
+        _htmlSanitizer.AllowedTags.Add("tbody");
+        _htmlSanitizer.AllowedTags.Add("tr");
+        _htmlSanitizer.AllowedTags.Add("td");
+        _htmlSanitizer.AllowedTags.Add("th");
+        _htmlSanitizer.AllowedTags.Add("figure");
+        _htmlSanitizer.AllowedTags.Add("figcaption");
+        
+        _htmlSanitizer.AllowedAttributes.Clear();
+        _htmlSanitizer.AllowedAttributes.Add("href");
+        _htmlSanitizer.AllowedAttributes.Add("src");
+        _htmlSanitizer.AllowedAttributes.Add("alt");
+        _htmlSanitizer.AllowedAttributes.Add("title");
+        _htmlSanitizer.AllowedAttributes.Add("class");
+        _htmlSanitizer.AllowedAttributes.Add("width");
+        _htmlSanitizer.AllowedAttributes.Add("height");
+        _htmlSanitizer.AllowedAttributes.Add("style");
+        _htmlSanitizer.AllowedAttributes.Add("loading");
+        _htmlSanitizer.AllowedAttributes.Add("decoding");
+        _htmlSanitizer.AllowedAttributes.Add("srcset");
+        _htmlSanitizer.AllowedAttributes.Add("sizes");
+        _htmlSanitizer.AllowedAttributes.Add("crossorigin");
+        _htmlSanitizer.AllowedAttributes.Add("referrerpolicy");
+        _htmlSanitizer.AllowedAttributes.Add("target");
+        _htmlSanitizer.AllowedAttributes.Add("rel");
+        
+        _htmlSanitizer.AllowedSchemes.Clear();
+        _htmlSanitizer.AllowedSchemes.Add("http");
+        _htmlSanitizer.AllowedSchemes.Add("https");
+        _htmlSanitizer.AllowedSchemes.Add("data");
+        
+        _htmlSanitizer.AllowedCssProperties.Clear();
+        _htmlSanitizer.AllowedCssProperties.Add("width");
+        _htmlSanitizer.AllowedCssProperties.Add("height");
+        _htmlSanitizer.AllowedCssProperties.Add("max-width");
+        _htmlSanitizer.AllowedCssProperties.Add("max-height");
+        _htmlSanitizer.AllowedCssProperties.Add("margin");
+        _htmlSanitizer.AllowedCssProperties.Add("padding");
+        _htmlSanitizer.AllowedCssProperties.Add("text-align");
+        _htmlSanitizer.AllowedCssProperties.Add("float");
+        _htmlSanitizer.AllowedCssProperties.Add("display");
+        _htmlSanitizer.AllowedCssProperties.Add("border");
+        _htmlSanitizer.AllowedCssProperties.Add("border-radius");
+        _htmlSanitizer.AllowedCssProperties.Add("object-fit");
+        _htmlSanitizer.AllowedCssProperties.Add("vertical-align");
+        
+        _htmlSanitizer.AllowDataAttributes = false;
+        _htmlSanitizer.KeepChildNodes = true;
+        
+        Logger.LogDebug("ArticleViewer HtmlSanitizer configured");
+    }
+
+    private string SanitizeHtml(string html)
+    {
+        try
+        {
+            var sanitized = _htmlSanitizer.Sanitize(html);
+            
+            sanitized = System.Text.RegularExpressions.Regex.Replace(
+                sanitized,
+                @"<img\s+([^>]*?)(?:referrerpolicy=""[^""]*""\s*)?(?:crossorigin=""[^""]*""\s*)?([^>]*?)>",
+                match => 
+                {
+                    var attrs = match.Groups[1].Value + match.Groups[2].Value;
+                    if (!attrs.Contains("referrerpolicy"))
+                    {
+                        attrs += " referrerpolicy=\"no-referrer\"";
+                    }
+                    if (!attrs.Contains("crossorigin"))
+                    {
+                        attrs += " crossorigin=\"anonymous\"";
+                    }
+                    if (!attrs.Contains("loading"))
+                    {
+                        attrs += " loading=\"lazy\"";
+                    }
+                    return $"<img {attrs.Trim()}>";
+                },
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            
+            return sanitized;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to sanitize HTML content for article {ArticleId}", Article?.Id);
+            return "Content could not be displayed safely.";
+        }
+    }
+
+    private async Task HandleClose()
+    {
+        await OnClose.InvokeAsync();
+    }
+
+    private void HandleBackdropClick()
+    {
+        _ = HandleClose();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await HandleClose();
+        }
+    }
+
+    private async Task HandleToggleRead()
+    {
+        if (Article != null)
+        {
+            await OnToggleRead.InvokeAsync(Article);
+        }
+    }
+
+    private async Task HandleToggleFavorite()
+    {
+        if (Article != null)
+        {
+            await OnToggleFavorite.InvokeAsync(Article);
+        }
+    }
+}

@@ -1,0 +1,129 @@
+@using RssReader.Models
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+
+<div class="row">
+    <div class="col-md-6">
+        <AlertDisplay @bind-Alert="Alert" />
+        
+        <div class="row g-3">
+            <div class="col-md-4">
+                <select id="defaultCategory" @bind="SelectedCategoryId" class="form-control" disabled="@IsImporting">
+                    <option value="0">Select default category</option>
+                    @foreach (var category in Categories)
+                    {
+                        <option value="@category.Id">@category.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-5">
+                <InputFile OnChange="HandleFileSelected" class="form-control" id="opmlFile" accept=".opml,.xml" disabled="@IsImporting" />
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary w-100" @onclick="OnImport" disabled="@(SelectedFile == null || IsImporting)">
+                    @if (IsImporting)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        <span>Importing...</span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-upload me-2"></i>Import</span>
+                    }
+                </button>
+            </div>
+        </div>
+        @if (Progress != null)
+        {
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h5 class="card-title">Import Progress</h5>
+                    <div class="progress mb-2">
+                        <div class="progress-bar" role="progressbar"
+                             style="width: @($"{Progress.Percentage}%")"
+                             aria-valuenow="@Progress.Percentage"
+                             aria-valuemin="0"
+                             aria-valuemax="100">
+                            @Progress.Percentage%
+                        </div>
+                    </div>
+                    <p class="mb-0">
+                        Imported @Progress.Imported of @Progress.Total feeds
+                        @if (Progress.Skipped > 0)
+                        {
+                            <span class="text-warning">(@Progress.Skipped skipped)</span>
+                        }
+                        @if (Progress.Failed > 0)
+                        {
+                            <span class="text-danger">(@Progress.Failed failed)</span>
+                        }
+                    </p>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public List<Category> Categories { get; set; } = new();
+
+    [Parameter]
+    public EventCallback<OpmlImportArgs> OnImportRequested { get; set; }
+
+    [Parameter]
+    public Alert? Alert { get; set; }
+
+    [Parameter]
+    public EventCallback<Alert?> AlertChanged { get; set; }
+
+    [Parameter]
+    public ImportProgress? Progress { get; set; }
+
+    [Parameter]
+    public bool IsImporting { get; set; }
+
+    private IBrowserFile? SelectedFile { get; set; }
+    private int SelectedCategoryId { get; set; }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        SelectedFile = e.File;
+    }
+
+    private async Task OnImport()
+    {
+        if (SelectedFile == null) return;
+
+        await AlertChanged.InvokeAsync(null);
+
+        var args = new OpmlImportArgs
+        {
+            File = SelectedFile,
+            DefaultCategoryId = SelectedCategoryId
+        };
+
+        await OnImportRequested.InvokeAsync(args);
+    }
+
+    public void Reset()
+    {
+        SelectedFile = null;
+        SelectedCategoryId = 0;
+    }
+
+    public class OpmlImportArgs
+    {
+        public IBrowserFile File { get; set; } = default!;
+        public int DefaultCategoryId { get; set; }
+    }
+
+    public class ImportProgress
+    {
+        public int Total { get; set; }
+        public int Imported { get; set; }
+        public int Skipped { get; set; }
+        public int Failed { get; set; }
+        public int Percentage => Total > 0 ? (int)((Imported + Skipped + Failed) * 100.0 / Total) : 0;
+    }
+}

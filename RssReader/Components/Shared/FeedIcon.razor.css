@@ -1,0 +1,26 @@
+.feed-icon-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.feed-icon-wrapper .feed-icon-img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    vertical-align: middle;
+    transition: opacity 0.2s ease;
+}
+
+.feed-icon-wrapper .feed-icon-default {
+    font-size: 1em;
+    line-height: 1;
+    vertical-align: middle;
+    display: inline-block;
+    transition: opacity 0.2s ease;
+}
+
+.feed-icon-wrapper img:hover,
+.feed-icon-wrapper i:hover {
+    opacity: 0.8;
+}

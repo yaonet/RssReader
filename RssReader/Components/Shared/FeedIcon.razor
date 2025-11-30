@@ -1,0 +1,47 @@
+@namespace RssReader.Components.Shared
+
+<div class="feed-icon-wrapper">
+    @if (!string.IsNullOrEmpty(ImageUrl) && !_imageLoadFailed)
+    {
+        <img src="@ImageUrl"
+             alt=""
+             class="feed-icon-img @CssClass"
+             @onload="HandleImageLoad"
+             @onerror="HandleImageError" />
+    }
+    else
+    {
+        <i class="bi bi-rss-fill feed-icon-default @CssClass"></i>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string? ImageUrl { get; set; }
+    
+    [Parameter]
+    public string? Title { get; set; }
+    
+    [Parameter]
+    public string CssClass { get; set; } = "me-2 flex-shrink-0";
+    
+    [Parameter]
+    public string Style { get; set; } = "width: 16px; height: 16px; object-fit: contain; vertical-align: text-bottom;";
+    
+    private bool _imageLoadFailed = false;
+    
+    private void HandleImageLoad()
+    {
+        _imageLoadFailed = false;
+    }
+    
+    private void HandleImageError()
+    {
+        _imageLoadFailed = true;
+    }
+    
+    protected override void OnParametersSet()
+    {
+        _imageLoadFailed = false;
+    }
+}

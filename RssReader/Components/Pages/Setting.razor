@@ -1,0 +1,188 @@
+﻿@page "/setting"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RssReader.Services
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+@using System.ComponentModel.DataAnnotations
+@inject SettingsService SettingsService
+@inject ILogger<Setting> Logger
+
+<PageTitle>Settings</PageTitle>
+
+<h1>Settings</h1>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-gear me-2"></i>Feed Update Settings</h5>
+            </div>
+            <div class="card-body">
+                <AlertDisplay @bind-Alert="_alert" />
+
+                <EditForm Model="@_input" OnValidSubmit="HandleSaveSettings" FormName="settings">
+                    <DataAnnotationsValidator />
+                    
+                    <div class="mb-3">
+                        <label for="updateInterval" class="form-label">
+                            Update Interval (minutes)
+                        </label>
+                        <InputNumber id="updateInterval" 
+                                   @bind-Value="_input.UpdateIntervalMinutes" 
+                                   class="form-control" 
+                                   disabled="@_isLoading" />
+                        <ValidationMessage For="() => _input.UpdateIntervalMinutes" class="text-danger" />
+                        <div class="form-text">
+                            Feeds will be automatically updated every <strong>@_input.UpdateIntervalMinutes</strong> minutes.
+                            <br />
+                            Valid range: 1 - 1440 minutes (1 minute to 24 hours)
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="alert alert-info" role="alert">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Note:</strong> Changes will take effect on the next scheduled update cycle.
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary" disabled="@_isLoading">
+                            @if (_isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Saving...</span>
+                            }
+                            else
+                            {
+                                <span><i class="bi bi-save me-2"></i>Save Settings</span>
+                            }
+                        </button>
+                        <button type="button" class="btn btn-secondary" @onclick="HandleReset" disabled="@_isLoading">
+                            <i class="bi bi-arrow-counterclockwise me-2"></i>Reset to Default
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Current Configuration</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <td><strong>Update Interval:</strong></td>
+                            <td>@_currentInterval minutes (@GetIntervalDescription(_currentInterval))</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Default Interval:</strong></td>
+                            <td>@SettingsService.DefaultFeedUpdateInterval minutes</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private SettingsInputModel _input { get; set; }
+    
+    private Alert? _alert;
+    private bool _isLoading = false;
+    private int _currentInterval = SettingsService.DefaultFeedUpdateInterval;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSettingsAsync();
+    }
+
+    protected override void OnInitialized()
+    {
+        _input = new SettingsInputModel();
+        base.OnInitialized();
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _currentInterval = await SettingsService.GetFeedUpdateIntervalAsync();
+            _input.UpdateIntervalMinutes = _currentInterval;
+            
+            Logger.LogInformation("Loaded feed update interval: {Interval} minutes", _currentInterval);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading settings");
+            _alert = Alert.Error("Failed to load settings. Please refresh the page.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task HandleSaveSettings()
+    {
+        _isLoading = true;
+        _alert = null;
+
+        try
+        {
+            var success = await SettingsService.SetFeedUpdateIntervalAsync(_input.UpdateIntervalMinutes);
+            
+            if (success)
+            {
+                _currentInterval = _input.UpdateIntervalMinutes;
+                _alert = Alert.Success($"Settings saved successfully! Update interval set to {_currentInterval} minutes.");
+                Logger.LogInformation("User updated feed interval to {Minutes} minutes", _currentInterval);
+            }
+            else
+            {
+                _alert = Alert.Error("Failed to save settings. Please check the logs.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving settings");
+            _alert = Alert.Error($"An error occurred while saving settings: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task HandleReset()
+    {
+        _input.UpdateIntervalMinutes = SettingsService.DefaultFeedUpdateInterval;
+        await HandleSaveSettings();
+    }
+
+    private string GetIntervalDescription(int minutes)
+    {
+        if (minutes < 60)
+            return minutes == 1 ? "1 minute" : $"{minutes} minutes";
+        
+        var hours = minutes / 60;
+        var remainingMinutes = minutes % 60;
+        
+        if (remainingMinutes == 0)
+            return hours == 1 ? "1 hour" : $"{hours} hours";
+        
+        return $"{hours}h {remainingMinutes}m";
+    }
+
+    public sealed class SettingsInputModel
+    {
+        [Required]
+        [Range(1, 1440, ErrorMessage = "Update interval must be between 1 and 1440 minutes (1 minute to 24 hours).")]
+        public int UpdateIntervalMinutes { get; set; } = SettingsService.DefaultFeedUpdateInterval;
+    }
+}
