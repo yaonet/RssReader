@@ -13,6 +13,7 @@
 @inject IDbContextFactory<RssReader.Data.RssReaderContext> DbFactory
 @inject DataUpdateNotificationService NotificationService
 @inject ILogger<Articles> Logger
+@inject FeedService FeedService
 
 <PageTitle>Articles</PageTitle>
 
@@ -21,7 +22,7 @@
 <AlertDisplay @bind-Alert="_alert" />
 
 <div class="mb-3 row">
-    <div class="col-md-2 col-lg-2">
+    <div class="col-md-3 col-lg-2">
         <input type="search" 
                class="form-control" 
                @bind="_titleFilter" 
@@ -29,9 +30,74 @@
                placeholder="Search by article title or feed name" 
                aria-label="Search articles by title or feed name" />
     </div>
+    
+    <div class="col-md-9 col-lg-10 d-flex align-items-center gap-2 flex-wrap">
+        <div class="btn-group" role="group" aria-label="Filter articles">
+            <button type="button" 
+                    class="btn btn-sm @(_readFilter == ReadFilter.Unread ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => SetReadFilter(ReadFilter.Unread)"
+                    title="Show unread articles">
+                <i class="bi bi-envelope"></i> Unread
+            </button>
+            <button type="button" 
+                    class="btn btn-sm @(_readFilter == ReadFilter.Read ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => SetReadFilter(ReadFilter.Read)"
+                    title="Show read articles">
+                <i class="bi bi-envelope-open"></i> Read
+            </button>
+            <button type="button" 
+                    class="btn btn-sm @(_favoriteFilter == FavoriteFilter.Favorite ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => SetFavoriteFilter(FavoriteFilter.Favorite)"
+                    title="Show favorite articles">
+                <i class="bi bi-star-fill"></i> Favorite
+            </button>
+            <button type="button" 
+                    class="btn btn-sm @(_favoriteFilter == FavoriteFilter.NonFavorite ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => SetFavoriteFilter(FavoriteFilter.NonFavorite)"
+                    title="Show non-favorite articles">
+                <i class="bi bi-star"></i> Non-Favorite
+            </button>
+        </div>
+        
+        @if (_readFilter != ReadFilter.All || _favoriteFilter != FavoriteFilter.All)
+        {
+            <button type="button" 
+                    class="btn btn-sm btn-outline-secondary"
+                    @onclick="ClearFilters"
+                    title="Clear all filters">
+                <i class="bi bi-x-circle"></i> Clear Filters
+            </button>
+        }
+        
+        <div class="btn-group" role="group" aria-label="Article actions">
+            <button type="button" 
+                    class="btn btn-sm btn-outline-primary"
+                    @onclick="MarkAllAsRead"
+                    disabled="@_isProcessing"
+                    title="Mark all visible articles as read">
+                <i class="bi bi-check-all"></i> Mark All Read
+            </button>
+            <button type="button" 
+                    class="btn btn-sm btn-outline-success"
+                    @onclick="UpdateAllFeeds"
+                    disabled="@_isProcessing"
+                    title="Update all feeds">
+                @if (_isProcessing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                }
+                else
+                {
+                    <i class="bi bi-arrow-clockwise"></i>
+                }
+                Update Feeds
+            </button>
+        </div>
+    </div>
+    
     @if (!string.IsNullOrEmpty(_filterInfo))
     {
-        <div class="col-md-6 col-lg-4 d-flex align-items-center">
+        <div class="col-12 mt-2">
             <span class="text-muted me-2">
                 <i class="bi bi-funnel me-1"></i>@_filterInfo
             </span>
@@ -58,18 +124,18 @@ else
 {
     <div class="table-responsive">
         <QuickGrid Class="table" Items="FilteredArticles" Pagination="_pagination">
-            <TemplateColumn Title="Feed" SortBy="@(GridSort<Article>.ByAscending(a => a.Feed != null ? a.Feed.Title : string.Empty))">
-                @if (context.Feed != null)
+            <TemplateColumn Title="Feed" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.FeedTitle ?? string.Empty))">
+                @if (!string.IsNullOrEmpty(context.FeedTitle))
                 {
-                    <FeedIcon ImageUrl="@context.Feed.ImageUrl" Title="@context.Feed.Title" />
-                    <a href="@context.Feed.Link" target="_blank" rel="noopener noreferrer">@context.Feed.Title</a>
+                    <FeedIcon ImageUrl="@context.FeedImageUrl" Title="@context.FeedTitle" />
+                    <a href="@context.FeedLink" target="_blank" rel="noopener noreferrer">@context.FeedTitle</a>
                 }
                 else
                 {
                     <span class="text-muted">Unknown Feed</span>
                 }
             </TemplateColumn>
-            <TemplateColumn Title="Title" SortBy="@(GridSort<Article>.ByAscending(a => a.Title))">
+            <TemplateColumn Title="Title" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.Title))">
                 <button class="btn btn-link text-start p-0 text-decoration-none" 
                         @onclick="() => ShowArticleContent(context)"
                         style="color: inherit;"
@@ -117,9 +183,13 @@ else
 
 @code {
     private const int DefaultItemsPerPage = 30;
+    private const int MaxArticlesToLoad = 1000;
+    
+    private enum ReadFilter { All, Read, Unread }
+    private enum FavoriteFilter { All, Favorite, NonFavorite }
     
     private PaginationState _pagination = new PaginationState { ItemsPerPage = DefaultItemsPerPage };
-    private List<Article> _articles = new();
+    private List<ArticleListItem> _articles = new();
     private string _titleFilter = string.Empty;
     private string _filterInfo = string.Empty;
     private int _currentCategoryId = -1;
@@ -128,6 +198,9 @@ else
     private Alert? _alert;
     private bool _isLoadingArticles = true;
     private bool _disposed = false;
+    private bool _isProcessing = false;
+    private ReadFilter _readFilter = ReadFilter.All;
+    private FavoriteFilter _favoriteFilter = FavoriteFilter.All;
 
     [SupplyParameterFromQuery(Name = "categoryId")]
     public int? CategoryId { get; set; }
@@ -135,12 +208,41 @@ else
     [SupplyParameterFromQuery(Name = "feedId")]
     public int? FeedId { get; set; }
 
-    private IQueryable<Article> FilteredArticles =>
-        string.IsNullOrWhiteSpace(_titleFilter)
-            ? _articles.AsQueryable()
-            : _articles.AsQueryable().Where(a => 
-                (a.Title != null && a.Title.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)) ||
-                (a.Feed != null && a.Feed.Title != null && a.Feed.Title.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)));
+    private IQueryable<ArticleListItem> FilteredArticles
+    {
+        get
+        {
+            IEnumerable<ArticleListItem> query = _articles;
+            
+            if (!string.IsNullOrWhiteSpace(_titleFilter))
+            {
+                var filterLower = _titleFilter.ToLowerInvariant();
+                query = query.Where(a => 
+                    (a.Title != null && a.Title.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)) ||
+                    (a.FeedTitle != null && a.FeedTitle.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)));
+            }
+            
+            if (_readFilter == ReadFilter.Read)
+            {
+                query = query.Where(a => a.IsRead);
+            }
+            else if (_readFilter == ReadFilter.Unread)
+            {
+                query = query.Where(a => !a.IsRead);
+            }
+            
+            if (_favoriteFilter == FavoriteFilter.Favorite)
+            {
+                query = query.Where(a => a.IsFavorite);
+            }
+            else if (_favoriteFilter == FavoriteFilter.NonFavorite)
+            {
+                query = query.Where(a => !a.IsFavorite);
+            }
+            
+            return query.AsQueryable();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -178,21 +280,19 @@ else
             if (FeedId.HasValue && FeedId.Value > 0)
             {
                 query = context.Set<Article>()
-                    .Where(a => a.FeedId == FeedId.Value)
-                    .Include(a => a.Feed)
-                    .ThenInclude(f => f!.Category);
+                    .Where(a => a.FeedId == FeedId.Value);
                 
                 var feed = await context.Feed
-                    .Include(f => f.Category)
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(f => f.Id == FeedId.Value);
+                    .Where(f => f.Id == FeedId.Value)
+                    .Select(f => new { f.Title, CategoryName = f.Category != null ? f.Category.Name : null })
+                    .FirstOrDefaultAsync();
                 
                 if (feed != null)
                 {
                     _filterInfo = $"Feed: {feed.Title}";
-                    if (feed.Category != null)
+                    if (feed.CategoryName != null)
                     {
-                        _filterInfo += $" (Category: {feed.Category.Name})";
+                        _filterInfo += $" (Category: {feed.CategoryName})";
                     }
                 }
                 else
@@ -204,17 +304,16 @@ else
             else if (CategoryId.HasValue && CategoryId.Value > 0)
             {
                 query = context.Set<Article>()
-                    .Include(a => a.Feed)
-                    .ThenInclude(f => f!.Category)
                     .Where(a => a.Feed!.CategoryId == CategoryId.Value);
                 
                 var category = await context.Category
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(c => c.Id == CategoryId.Value);
+                    .Where(c => c.Id == CategoryId.Value)
+                    .Select(c => c.Name)
+                    .FirstOrDefaultAsync();
                     
                 if (category != null)
                 {
-                    _filterInfo = $"Category: {category.Name}";
+                    _filterInfo = $"Category: {category}";
                 }
                 else
                 {
@@ -224,16 +323,29 @@ else
             }
             else
             {
-                query = context.Set<Article>()
-                    .Include(a => a.Feed)
-                    .ThenInclude(f => f!.Category);
-                
+                query = context.Set<Article>();
                 _filterInfo = string.Empty;
             }
 
+            query = ApplyReadAndFavoriteFilters(query);
+
             _articles = await query
                 .OrderByDescending(a => a.PublishDate)
-                .AsNoTracking()
+                .Take(MaxArticlesToLoad)
+                .Select(a => new ArticleListItem
+                {
+                    Id = a.Id,
+                    Title = a.Title,
+                    Link = a.Link,
+                    PublishDate = a.PublishDate,
+                    IsRead = a.IsRead,
+                    IsFavorite = a.IsFavorite,
+                    FeedId = a.FeedId,
+                    FeedTitle = a.Feed != null ? a.Feed.Title : null,
+                    FeedLink = a.Feed != null ? a.Feed.Link : null,
+                    FeedImageUrl = a.Feed != null ? a.Feed.ImageUrl : null,
+                    CategoryName = a.Feed != null && a.Feed.Category != null ? a.Feed.Category.Name : null
+                })
                 .ToListAsync();
                 
             Logger.LogInformation("Loaded {ArticleCount} articles", _articles.Count);
@@ -242,7 +354,7 @@ else
         {
             Logger.LogError(ex, "Error loading articles. CategoryId: {CategoryId}, FeedId: {FeedId}", CategoryId, FeedId);
             _alert = Alert.Error($"Failed to load articles: {ex.Message}");
-            _articles = new List<Article>();
+            _articles = new List<ArticleListItem>();
         }
         finally
         {
@@ -250,13 +362,41 @@ else
         }
     }
 
-    private async Task ShowArticleContent(Article article)
+    private IQueryable<Article> ApplyReadAndFavoriteFilters(IQueryable<Article> query)
     {
-        _selectedArticle = article;
-        
-        if (!article.IsRead)
+        if (_readFilter == ReadFilter.Unread)
         {
-            await MarkArticleAsRead(article);
+            query = query.Where(a => !a.IsRead);
+        }
+        else if (_readFilter == ReadFilter.Read)
+        {
+            query = query.Where(a => a.IsRead);
+        }
+
+        if (_favoriteFilter == FavoriteFilter.Favorite)
+        {
+            query = query.Where(a => a.IsFavorite);
+        }
+        else if (_favoriteFilter == FavoriteFilter.NonFavorite)
+        {
+            query = query.Where(a => !a.IsFavorite);
+        }
+
+        return query;
+    }
+
+    private async Task ShowArticleContent(ArticleListItem articleItem)
+    {
+        await using var context = await DbFactory.CreateDbContextAsync();
+        
+        _selectedArticle = await context.Set<Article>()
+            .Include(a => a.Feed)
+            .ThenInclude(f => f!.Category)
+            .FirstOrDefaultAsync(a => a.Id == articleItem.Id);
+        
+        if (_selectedArticle != null && !_selectedArticle.IsRead)
+        {
+            await MarkArticleAsRead(articleItem);
         }
     }
 
@@ -265,81 +405,104 @@ else
         _selectedArticle = null;
     }
 
-    private async Task MarkArticleAsRead(Article article)
+    private async Task MarkArticleAsRead(ArticleListItem articleItem)
     {
         try
         {
             await using var context = await DbFactory.CreateDbContextAsync();
             
             await context.Set<Article>()
-                .Where(a => a.Id == article.Id)
+                .Where(a => a.Id == articleItem.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, true));
             
-            article.IsRead = true;
+            articleItem.IsRead = true;
             
-            Logger.LogInformation("Marked article as read: {ArticleId}", article.Id);
+            if (_selectedArticle != null)
+            {
+                _selectedArticle.IsRead = true;
+            }
+            
+            Logger.LogInformation("Marked article as read: {ArticleId}", articleItem.Id);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to mark article as read: {ArticleId}", article.Id);
+            Logger.LogError(ex, "Failed to mark article as read: {ArticleId}", articleItem.Id);
             _alert = Alert.Error($"Failed to mark article as read: {ex.Message}");
         }
     }
 
-    private async Task ToggleReadStatus(Article article)
+    private async Task ToggleReadStatus(ArticleListItem articleItem)
     {
         try
         {
-            var newStatus = !article.IsRead;
+            var newStatus = !articleItem.IsRead;
             
             await using var context = await DbFactory.CreateDbContextAsync();
             
             await context.Set<Article>()
-                .Where(a => a.Id == article.Id)
+                .Where(a => a.Id == articleItem.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, newStatus));
             
-            article.IsRead = newStatus;
+            articleItem.IsRead = newStatus;
             
-            Logger.LogInformation("Toggled read status for article {ArticleId} to {IsRead}", article.Id, newStatus);
+            if (_selectedArticle != null && _selectedArticle.Id == articleItem.Id)
+            {
+                _selectedArticle.IsRead = newStatus;
+            }
+            
+            Logger.LogInformation("Toggled read status for article {ArticleId} to {IsRead}", articleItem.Id, newStatus);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to update read status for article: {ArticleId}", article.Id);
+            Logger.LogError(ex, "Failed to update read status for article: {ArticleId}", articleItem.Id);
             _alert = Alert.Error($"Failed to update read status: {ex.Message}");
         }
     }
 
-    private async Task ToggleFavoriteStatus(Article article)
+    private async Task ToggleFavoriteStatus(ArticleListItem articleItem)
     {
         try
         {
-            var newStatus = !article.IsFavorite;
+            var newStatus = !articleItem.IsFavorite;
             
             await using var context = await DbFactory.CreateDbContextAsync();
             
             await context.Set<Article>()
-                .Where(a => a.Id == article.Id)
+                .Where(a => a.Id == articleItem.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsFavorite, newStatus));
             
-            article.IsFavorite = newStatus;
+            articleItem.IsFavorite = newStatus;
             
-            Logger.LogInformation("Toggled favorite status for article {ArticleId} to {IsFavorite}", article.Id, newStatus);
+            if (_selectedArticle != null && _selectedArticle.Id == articleItem.Id)
+            {
+                _selectedArticle.IsFavorite = newStatus;
+            }
+            
+            Logger.LogInformation("Toggled favorite status for article {ArticleId} to {IsFavorite}", articleItem.Id, newStatus);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to update favorite status for article: {ArticleId}", article.Id);
+            Logger.LogError(ex, "Failed to update favorite status for article: {ArticleId}", articleItem.Id);
             _alert = Alert.Error($"Failed to update favorite status: {ex.Message}");
         }
     }
 
     private async Task HandleToggleReadFromViewer(Article article)
     {
-        await ToggleReadStatus(article);
+        var articleItem = _articles.FirstOrDefault(a => a.Id == article.Id);
+        if (articleItem != null)
+        {
+            await ToggleReadStatus(articleItem);
+        }
     }
 
     private async Task HandleToggleFavoriteFromViewer(Article article)
     {
-        await ToggleFavoriteStatus(article);
+        var articleItem = _articles.FirstOrDefault(a => a.Id == article.Id);
+        if (articleItem != null)
+        {
+            await ToggleFavoriteStatus(articleItem);
+        }
     }
 
     private async void HandleFeedsUpdated()
@@ -383,6 +546,110 @@ else
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error handling categories updated event");
+        }
+    }
+
+    private void SetReadFilter(ReadFilter filter)
+    {
+        if (_readFilter == filter)
+        {
+            _readFilter = ReadFilter.All;
+        }
+        else
+        {
+            _readFilter = filter;
+        }
+        _pagination = new PaginationState { ItemsPerPage = DefaultItemsPerPage };
+    }
+    
+    private void SetFavoriteFilter(FavoriteFilter filter)
+    {
+        if (_favoriteFilter == filter)
+        {
+            _favoriteFilter = FavoriteFilter.All;
+        }
+        else
+        {
+            _favoriteFilter = filter;
+        }
+        _pagination = new PaginationState { ItemsPerPage = DefaultItemsPerPage };
+    }
+    
+    private async Task ClearFilters()
+    {
+        _titleFilter = string.Empty;
+        _readFilter = ReadFilter.All;
+        _favoriteFilter = FavoriteFilter.All;
+        _pagination = new PaginationState { ItemsPerPage = DefaultItemsPerPage };
+        _alert = null;
+        await LoadArticlesAsync();
+    }
+    
+    private async Task MarkAllAsRead()
+    {
+        if (_isProcessing) return;
+        
+        try
+        {
+            _isProcessing = true;
+            
+            var articlesToMark = FilteredArticles.Where(a => !a.IsRead).Select(a => a.Id).ToList();
+            
+            if (!articlesToMark.Any())
+            {
+                _alert = Alert.Info("All visible articles are already marked as read.");
+                return;
+            }
+            
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            await context.Set<Article>()
+                .Where(a => articlesToMark.Contains(a.Id))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, true));
+            
+            foreach (var article in _articles.Where(a => articlesToMark.Contains(a.Id)))
+            {
+                article.IsRead = true;
+            }
+            
+            _alert = Alert.Success($"Marked {articlesToMark.Count} article(s) as read.");
+            Logger.LogInformation("Marked {Count} articles as read", articlesToMark.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to mark all articles as read");
+            _alert = Alert.Error($"Failed to mark articles as read: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+    
+    private async Task UpdateAllFeeds()
+    {
+        if (_isProcessing) return;
+        
+        try
+        {
+            _isProcessing = true;
+            _alert = Alert.Info("Updating all feeds...");
+            
+            await FeedService.UpdateAllFeedsAsync();
+            
+            await LoadArticlesAsync();
+            
+            _alert = Alert.Success("All feeds updated successfully.");
+            Logger.LogInformation("All feeds updated successfully");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update all feeds");
+            _alert = Alert.Error($"Failed to update feeds: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
         }
     }
 

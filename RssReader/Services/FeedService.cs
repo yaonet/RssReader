@@ -13,6 +13,7 @@ namespace RssReader.Services
         private readonly IDbContextFactory<RssReaderContext>? _dbContextFactory;
         private readonly DataUpdateNotificationService? _notificationService;
         private readonly ILogger<FeedService> _logger;
+        private const int MaxConcurrentUpdates = 5;
 
         public FeedService(
             IHttpClientFactory httpClientFactory,
@@ -79,7 +80,11 @@ namespace RssReader.Services
                     .ToListAsync(cancellationToken);
 
                 result.TotalFeeds = feeds.Count;
-                _logger!.LogInformation("Starting update of {TotalFeeds} feeds", result.TotalFeeds);
+                _logger!.LogInformation("Starting concurrent update of {TotalFeeds} feeds with max {MaxConcurrent} concurrent updates", 
+                    result.TotalFeeds, MaxConcurrentUpdates);
+
+                using var semaphore = new SemaphoreSlim(MaxConcurrentUpdates);
+                var updateTasks = new List<Task>();
 
                 foreach (var feed in feeds)
                 {
@@ -89,18 +94,44 @@ namespace RssReader.Services
                         break;
                     }
 
-                    try
+                    await semaphore.WaitAsync(cancellationToken);
+
+                    var updateTask = Task.Run(async () =>
                     {
-                        await UpdateSingleFeedAsync(context, feed, cancellationToken);
-                        result.SuccessfulUpdates++;
-                    }
-                    catch (Exception ex)
-                    {
-                        result.FailedUpdates++;
-                        result.Errors.Add($"Feed '{feed.Title}': {ex.Message}");
-                        _logger.LogError(ex, "Failed to update feed {FeedId} ({FeedTitle})", feed.Id, feed.Title);
-                    }
+                        try
+                        {
+                            await using var taskContext = await _dbContextFactory!.CreateDbContextAsync(cancellationToken);
+                            var feedToUpdate = await taskContext.Feed.FindAsync(new object[] { feed.Id }, cancellationToken);
+                            
+                            if (feedToUpdate != null)
+                            {
+                                await UpdateSingleFeedAsync(taskContext, feedToUpdate, cancellationToken);
+                                
+                                lock (result)
+                                {
+                                    result.SuccessfulUpdates++;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (result)
+                            {
+                                result.FailedUpdates++;
+                                result.Errors.Add($"Feed '{feed.Title}': {ex.Message}");
+                            }
+                            _logger.LogError(ex, "Failed to update feed {FeedId} ({FeedTitle})", feed.Id, feed.Title);
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }, cancellationToken);
+
+                    updateTasks.Add(updateTask);
                 }
+
+                await Task.WhenAll(updateTasks);
 
                 _logger.LogInformation(
                     "Feed update completed. Total: {Total}, Success: {Success}, Failed: {Failed}",

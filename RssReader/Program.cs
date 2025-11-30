@@ -6,7 +6,17 @@ using RssReader.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContextFactory<RssReaderContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("RssReaderContext") ?? throw new InvalidOperationException("Connection string 'RssReaderContext' not found.")));
+{
+    options.UseSqlite(builder.Configuration.GetConnectionString("RssReaderContext") ?? throw new InvalidOperationException("Connection string 'RssReaderContext' not found."));
+    
+    if (builder.Environment.IsDevelopment())
+    {
+        options.EnableSensitiveDataLogging();
+        options.EnableDetailedErrors();
+    }
+    
+    options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+});
 
 builder.Services.AddQuickGridEntityFrameworkAdapter();
 

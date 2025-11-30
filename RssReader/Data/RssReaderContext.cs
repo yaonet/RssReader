@@ -38,6 +38,27 @@ namespace RssReader.Data
                 .HasForeignKey(a => a.FeedId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => a.FeedId);
+
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => a.PublishDate);
+
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => a.IsRead);
+
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => a.IsFavorite);
+
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => new { a.FeedId, a.PublishDate });
+
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => new { a.IsRead, a.PublishDate });
+
+            modelBuilder.Entity<Article>()
+                .HasIndex(a => new { a.IsFavorite, a.PublishDate });
+
             modelBuilder.Entity<AppSetting>()
                 .HasIndex(s => s.Key)
                 .IsUnique();
