@@ -1,17 +1,19 @@
 @namespace RssReader.Components.Shared
+@inject NavigationManager Navigation
 
 <div class="feed-icon-wrapper">
     @if (!string.IsNullOrEmpty(ImageUrl) && !_imageLoadFailed)
     {
-        <img src="@ImageUrl"
-             alt=""
+        <img src="@GetProxiedImageUrl()"
+             alt="@(Title ?? "Feed icon")"
              class="feed-icon-img @CssClass"
+             style="@Style"
              @onload="HandleImageLoad"
              @onerror="HandleImageError" />
     }
     else
     {
-        <i class="bi bi-rss-fill feed-icon-default @CssClass"></i>
+        <i class="bi bi-rss-fill feed-icon-default @CssClass" style="@Style"></i>
     }
 </div>
 
@@ -29,6 +31,22 @@
     public string Style { get; set; } = "width: 16px; height: 16px; object-fit: contain; vertical-align: text-bottom;";
     
     private bool _imageLoadFailed = false;
+    
+    private string GetProxiedImageUrl()
+    {
+        if (string.IsNullOrEmpty(ImageUrl))
+        {
+            return string.Empty;
+        }
+        
+        // URL encode the image URL
+        var encodedUrl = Uri.EscapeDataString(ImageUrl);
+        
+        // Get base URL from NavigationManager
+        var baseUri = Navigation.BaseUri.TrimEnd('/');
+        
+        return $"{baseUri}/api/image-proxy?url={encodedUrl}";
+    }
     
     private void HandleImageLoad()
     {

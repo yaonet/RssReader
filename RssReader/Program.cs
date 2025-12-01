@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RssReader.Data;
 using RssReader.Services;
+using RssReader.Endpoints;
 using Serilog;
 
 // Configure Serilog early to capture startup errors
@@ -106,6 +107,10 @@ try
     app.UseAntiforgery();
 
     app.MapStaticAssets();
+    
+    // Map image proxy endpoint
+    app.MapImageProxyEndpoint();
+    
     app.MapRazorComponents<App>()
         .AddInteractiveServerRenderMode();
 

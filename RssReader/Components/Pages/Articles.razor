@@ -419,6 +419,12 @@ else
                     CategoryName = a.Feed != null && a.Feed.Category != null ? a.Feed.Category.Name : null
                 })
                 .ToListAsync();
+            
+            // Sort unread articles first, then by publish date
+            _articles = _articles
+                .OrderBy(a => a.IsRead)
+                .ThenByDescending(a => a.PublishDate)
+                .ToList();
                 
             Logger.LogInformation("Loaded {ArticleCount} articles", _articles.Count);
         }
@@ -521,6 +527,12 @@ else
             {
                 _selectedArticle.IsRead = newStatus;
             }
+            
+            // Re-sort articles: unread first, then by publish date
+            _articles = _articles
+                .OrderBy(a => a.IsRead)
+                .ThenByDescending(a => a.PublishDate)
+                .ToList();
             
             Logger.LogInformation("Toggled read status for article {ArticleId} to {IsRead}", articleItem.Id, newStatus);
         }
@@ -705,6 +717,12 @@ else
             {
                 article.IsRead = true;
             }
+            
+            // Re-sort articles: unread first, then by publish date
+            _articles = _articles
+                .OrderBy(a => a.IsRead)
+                .ThenByDescending(a => a.PublishDate)
+                .ToList();
             
             _alert = Alert.Success($"Marked {articlesToMark.Count} article(s) as read.");
             Logger.LogInformation("Marked {Count} articles as read", articlesToMark.Count);

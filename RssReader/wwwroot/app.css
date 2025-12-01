@@ -73,3 +73,23 @@ h1:focus {
 .article-grid tbody tr:has(.article-row-unread) td {
     background-color: #fff5f5 !important;
 }
+
+/* Feed icon styles */
+.feed-icon-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.feed-icon-img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    vertical-align: text-bottom;
+    border-radius: 2px;
+}
+
+.feed-icon-default {
+    font-size: 16px;
+    color: #ff6600;
+}
