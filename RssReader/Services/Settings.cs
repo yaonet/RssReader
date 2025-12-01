@@ -8,10 +8,10 @@ namespace RssReader.Services
     /// <summary>
     /// Service for managing application settings stored in the database
     /// </summary>
-    public class SettingsService
+    public class Settings
     {
         private readonly IDbContextFactory<RssReaderContext> _dbContextFactory;
-        private readonly ILogger<SettingsService> _logger;
+        private readonly ILogger<Settings> _logger;
         private readonly IMemoryCache _cache;
         
         public const string FeedUpdateIntervalKey = "FeedUpdate.IntervalMinutes";
@@ -20,9 +20,9 @@ namespace RssReader.Services
         private const string CacheKeyPrefix = "AppSetting_";
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-        public SettingsService(
+        public Settings(
             IDbContextFactory<RssReaderContext> dbContextFactory,
-            ILogger<SettingsService> logger,
+            ILogger<Settings> logger,
             IMemoryCache cache)
         {
             _dbContextFactory = dbContextFactory;

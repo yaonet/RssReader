@@ -58,3 +58,18 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+/* Article row styles */
+.article-row-unread {
+    background-color: #fff5f5;
+}
+
+.article-row-read {
+    background-color: transparent;
+}
+
+/* Apply background to all cells in the row */
+.article-grid tbody tr td:has(.article-row-unread),
+.article-grid tbody tr:has(.article-row-unread) td {
+    background-color: #fff5f5 !important;
+}

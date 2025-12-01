@@ -4,22 +4,23 @@ using System.Xml;
 using Microsoft.EntityFrameworkCore;
 using RssReader.Data;
 using RssReader.Models;
+using RssReader.ViewModels;
 
 namespace RssReader.Services
 {
-    public class FeedService
+    public class FeedManager
     {
         private readonly IHttpClientFactory? _httpClientFactory;
         private readonly IDbContextFactory<RssReaderContext>? _dbContextFactory;
-        private readonly DataUpdateNotificationService? _notificationService;
-        private readonly ILogger<FeedService> _logger;
+        private readonly UpdateNotifier? _notificationService;
+        private readonly ILogger<FeedManager> _logger;
         private const int MaxConcurrentUpdates = 5;
 
-        public FeedService(
+        public FeedManager(
             IHttpClientFactory httpClientFactory,
             IDbContextFactory<RssReaderContext> dbContextFactory,
-            DataUpdateNotificationService notificationService,
-            ILogger<FeedService> logger)
+            UpdateNotifier notificationService,
+            ILogger<FeedManager> logger)
         {
             _httpClientFactory = httpClientFactory;
             _dbContextFactory = dbContextFactory;
@@ -83,6 +84,15 @@ namespace RssReader.Services
                 _logger!.LogInformation("Starting concurrent update of {TotalFeeds} feeds with max {MaxConcurrent} concurrent updates", 
                     result.TotalFeeds, MaxConcurrentUpdates);
 
+                // 报告初始进度
+                _notificationService!.NotifyFeedUpdateProgress(new FeedUpdateProgress
+                {
+                    TotalFeeds = result.TotalFeeds,
+                    ProcessedFeeds = 0,
+                    SuccessfulFeeds = 0,
+                    FailedFeeds = 0
+                });
+
                 using var semaphore = new SemaphoreSlim(MaxConcurrentUpdates);
                 var updateTasks = new List<Task>();
 
@@ -100,6 +110,19 @@ namespace RssReader.Services
                     {
                         try
                         {
+                            // 报告当前正在处理的 Feed
+                            lock (result)
+                            {
+                                _notificationService!.NotifyFeedUpdateProgress(new FeedUpdateProgress
+                                {
+                                    TotalFeeds = result.TotalFeeds,
+                                    ProcessedFeeds = result.SuccessfulUpdates + result.FailedUpdates,
+                                    SuccessfulFeeds = result.SuccessfulUpdates,
+                                    FailedFeeds = result.FailedUpdates,
+                                    CurrentFeedTitle = feed.Title
+                                });
+                            }
+
                             await using var taskContext = await _dbContextFactory!.CreateDbContextAsync(cancellationToken);
                             var feedToUpdate = await taskContext.Feed.FindAsync(new object[] { feed.Id }, cancellationToken);
                             
@@ -110,6 +133,16 @@ namespace RssReader.Services
                                 lock (result)
                                 {
                                     result.SuccessfulUpdates++;
+                                    
+                                    // 报告进度更新
+                                    _notificationService!.NotifyFeedUpdateProgress(new FeedUpdateProgress
+                                    {
+                                        TotalFeeds = result.TotalFeeds,
+                                        ProcessedFeeds = result.SuccessfulUpdates + result.FailedUpdates,
+                                        SuccessfulFeeds = result.SuccessfulUpdates,
+                                        FailedFeeds = result.FailedUpdates,
+                                        CurrentFeedTitle = feed.Title
+                                    });
                                 }
                             }
                         }
@@ -119,6 +152,16 @@ namespace RssReader.Services
                             {
                                 result.FailedUpdates++;
                                 result.Errors.Add($"Feed '{feed.Title}': {ex.Message}");
+                                
+                                // 报告进度更新（包括失败）
+                                _notificationService!.NotifyFeedUpdateProgress(new FeedUpdateProgress
+                                {
+                                    TotalFeeds = result.TotalFeeds,
+                                    ProcessedFeeds = result.SuccessfulUpdates + result.FailedUpdates,
+                                    SuccessfulFeeds = result.SuccessfulUpdates,
+                                    FailedFeeds = result.FailedUpdates,
+                                    CurrentFeedTitle = feed.Title
+                                });
                             }
                             _logger.LogError(ex, "Failed to update feed {FeedId} ({FeedTitle})", feed.Id, feed.Title);
                         }
@@ -181,7 +224,7 @@ namespace RssReader.Services
         {
             if (_httpClientFactory == null || _dbContextFactory == null || _notificationService == null || _logger == null)
             {
-                throw new InvalidOperationException("FeedService was not initialized with required dependencies. Use the constructor with all parameters.");
+                throw new InvalidOperationException("FeedManager was not initialized with required dependencies. Use the constructor with all parameters.");
             }
         }
 
@@ -211,6 +254,8 @@ namespace RssReader.Services
             feed.LastUpdated = syndicationFeed.LastUpdatedTime.UtcDateTime != default
                 ? syndicationFeed.LastUpdatedTime.UtcDateTime
                 : DateTime.UtcNow;
+
+            context.Update(feed);
 
             var existingArticleLinks = await context.Set<Article>()
                 .Where(a => a.FeedId == feed.Id)

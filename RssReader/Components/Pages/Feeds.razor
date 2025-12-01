@@ -8,15 +8,15 @@
 @using RssReader.Services
 @using RssReader.Components.Feeds
 @using RssReader.Components.Shared
+@using Microsoft.JSInterop
 @inject IDbContextFactory<RssReaderContext> DbFactory
-@inject DataUpdateNotificationService NotificationService
-@inject OpmlImportService OpmlService
-@inject FeedService FeedService
+@inject UpdateNotifier NotificationService
+@inject OpmlHandler OpmlService
+@inject FeedManager FeedService
 @inject ILogger<Feeds> Logger
+@inject IJSRuntime JSRuntime
 
 <PageTitle>Feeds</PageTitle>
-
-<h1>Feeds</h1>
 
 <div class="mb-3">
     <ul class="nav nav-tabs" role="tablist">
@@ -34,23 +34,39 @@
                 Import OPML
             </button>
         </li>
+        <li class="nav-item ms-auto" role="presentation">
+            <button class="btn btn-outline-primary" 
+                    @onclick="ExportOpml" 
+                    disabled="@(isExporting || !_allFeeds.Any())"
+                    type="button">
+                @if (isExporting)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                }
+                else
+                {
+                    <i class="bi bi-download me-1"></i>
+                }
+                Export OPML
+            </button>
+        </li>
     </ul>
 </div>
 
 @if (activeTab == "add")
 {
-    <AddFeedForm @ref="addFeedForm"
-                 Categories="_categories"
-                 OnFeedAdded="HandleAddFeed"
-                 @bind-Alert="feedAlert" />
+    <AddFeed @ref="addFeedForm"
+             Categories="_categories"
+             OnFeedAdded="HandleAddFeed"
+             @bind-Alert="feedAlert" />
 }
 else
 {
-    <OpmlImportForm Categories="_categories"
-                    OnImportRequested="HandleOpmlImport"
-                    @bind-Alert="importAlert"
-                    Progress="@importProgress"
-                    IsImporting="@isImporting" />
+    <ImportFeed Categories="_categories"
+                OnImportRequested="HandleOpmlImport"
+                @bind-Alert="importAlert"
+                Progress="@importProgress"
+                IsImporting="@isImporting" />
 }
 
 <hr/>
@@ -63,7 +79,7 @@ else
         </div>
     </div>
 }
-else if (!_allFeeds.Any())
+else if (!DisplayedFeeds.Any())
 {
     <div class="alert alert-info" role="alert">
         <i class="bi bi-info-circle me-2"></i>No feeds yet. Add your first feed above.
@@ -72,46 +88,53 @@ else if (!_allFeeds.Any())
 else
 {
     <div>
-        <QuickGrid Class="table" Items="_allFeeds.AsQueryable()">
+        @if (_selectedCategoryId.HasValue)
+        {
+            var categoryName = _categories.FirstOrDefault(c => c.Id == _selectedCategoryId.Value)?.Name ?? "Unknown";
+            <div class="alert alert-info d-flex justify-content-between align-items-center mb-3" role="alert">
+                <span>
+                    <i class="bi bi-funnel-fill me-2"></i>
+                    <strong>Filtered by category:</strong> @categoryName
+                </span>
+                <button type="button" class="btn btn-sm btn-outline-info" @onclick="ClearCategoryFilter">
+                    <i class="bi bi-x-circle me-1"></i>Clear Filter
+                </button>
+            </div>
+        }
+        <QuickGrid Class="table" Items="DisplayedFeeds">
             <TemplateColumn Title="Category" Context="feed" SortBy="@(GridSort<Feed>.ByAscending(f => f.Category != null ? f.Category.Name : "Uncategorized"))">
-                @(feed.Category?.Name ?? "Uncategorized")
+                <button class="btn btn-link p-0 text-start" 
+                        @onclick="() => FilterByCategory(feed.CategoryId)"
+                        style="text-decoration: none; cursor: pointer;"
+                        title="Click to filter by this category">
+                    @(feed.Category?.Name ?? "Uncategorized")
+                </button>
             </TemplateColumn>
-            <TemplateColumn Title="Title" Context="feed" SortBy="@(GridSort<Feed>.ByAscending(f => f.Title))">
+            <TemplateColumn Title="Feed" Context="feed" SortBy="@(GridSort<Feed>.ByAscending(f => f.Title))">
                 <div class="d-flex align-items-center">
                     <FeedIcon ImageUrl="@feed.ImageUrl" Title="@feed.Title" CssClass="me-2" />
-                    <a href="@feed.Link" target="_blank">@feed.Title</a>
+                    <a href="@feed.Link" target="_blank" class="text-decoration-none">@feed.Title</a>
                 </div>
             </TemplateColumn>
-            <TemplateColumn Title="FeedUrl" Context="feed">
-                <a href="@feed.Url" target="_blank">@feed.Url</a>
-            </TemplateColumn>
-            <PropertyColumn Property="feed => feed.LastUpdated" Sortable="true" />
-            <TemplateColumn Title="Actions" Context="feed">
-                <button class="btn btn-danger btn-sm" 
-                        @onclick="() => ShowDeleteConfirmation(feed)" 
-                        disabled="@isDeleting"
-                        aria-label="@($"Delete feed {feed.Title}")">
-                    @if (isDeleting && deletingFeedId == feed.Id)
-                    {
-                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                    }
-                    else
-                    {
-                        <span>Delete</span>
-                    }
+            <TemplateColumn Title="" Context="feed">
+                <button class="btn btn-sm btn-link p-0 border-0 text-primary" 
+                        @onclick="() => OpenFeedManagement(feed)"
+                        aria-label="@($"Manage feed {feed.Title}")">
+                    <i class="bi bi-gear-fill"></i>
                 </button>
+            </TemplateColumn>
+            <TemplateColumn Title="Last Updated" Context="feed" SortBy="@(GridSort<Feed>.ByDescending(f => f.LastUpdated))" Class="d-none d-md-table-cell">
+                @feed.LastUpdated
             </TemplateColumn>
         </QuickGrid>
     </div>
 }
 
-<DeleteConfirmDialog IsVisible="@showDeleteDialog"
-                     Title="Confirm Delete"
-                     Message="@GetDeleteMessage()"
-                     Warning="@(Alert.Warning("This will also delete all associated articles."))"
-                     IsProcessing="@isDeleting"
-                     OnConfirm="ConfirmDelete"
-                     OnCancel="CancelDelete" />
+<RssReader.Components.Feeds.FeedEditor @bind-IsVisible="isSidebarVisible"
+                                        CurrentFeed="selectedFeedForManagement"
+                                        Categories="_categories"
+                                        OnFeedUpdated="HandleFeedUpdated"
+                                        OnFeedDeleted="HandleFeedDeleted" />
 
 @code {
     private const long MaxOpmlFileSize = 10 * 1024 * 1024;
@@ -119,21 +142,27 @@ else
     
     private List<Category> _categories = new();
     private List<Feed> _allFeeds = new();
+    private List<Feed> _filteredFeeds = new();
     private string activeTab = "add";
+    private int? _selectedCategoryId = null;
     
-    private bool isDeleting = false;
-    private int? deletingFeedId = null;
-    private bool showDeleteDialog = false;
-    private Feed? feedToDelete = null;
-
     private bool isImporting = false;
-    private OpmlImportForm.ImportProgress? importProgress;
+    private bool isExporting = false;
+    private ImportFeed.ImportProgress? importProgress;
 
     private Alert? feedAlert;
     private Alert? importAlert;
     
-    private AddFeedForm? addFeedForm;
+    private AddFeed? addFeedForm;
     private bool _isLoadingFeeds = true;
+    
+    private bool isSidebarVisible = false;
+    private Feed? selectedFeedForManagement = null;
+    
+    private IQueryable<Feed> DisplayedFeeds => 
+        _selectedCategoryId.HasValue 
+            ? _filteredFeeds.AsQueryable() 
+            : _allFeeds.AsQueryable();
 
     protected override async Task OnInitializedAsync()
     {
@@ -181,15 +210,50 @@ else
                 .AsNoTracking()
                 .OrderByDescending(f => f.LastUpdated)
                 .ToListAsync();
+            
+            ApplyCategoryFilter();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading feeds");
             _allFeeds = new List<Feed>();
+            _filteredFeeds = new List<Feed>();
         }
         finally
         {
             _isLoadingFeeds = false;
+        }
+    }
+
+    private async Task ExportOpml()
+    {
+        if (isExporting) return;
+
+        try
+        {
+            isExporting = true;
+            ClearAlerts();
+
+            Logger.LogInformation("Starting OPML export");
+            var opmlContent = await OpmlService.ExportOpmlAsync();
+
+            var fileName = $"feeds_{DateTime.Now:yyyyMMdd_HHmmss}.opml";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(opmlContent);
+            var base64 = Convert.ToBase64String(bytes);
+            
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, base64, "application/xml");
+
+            feedAlert = Alert.Success($"Successfully exported {_allFeeds.Count} feeds to {fileName}");
+            Logger.LogInformation("Successfully exported {FeedCount} feeds", _allFeeds.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error exporting OPML");
+            feedAlert = Alert.Error($"Failed to export OPML: {ex.Message}");
+        }
+        finally
+        {
+            isExporting = false;
         }
     }
 
@@ -240,7 +304,7 @@ else
         }
     }
 
-    private async Task HandleOpmlImport(OpmlImportForm.OpmlImportArgs args)
+    private async Task HandleOpmlImport(ImportFeed.OpmlImportArgs args)
     {
         importAlert = null;
         isImporting = true;
@@ -266,7 +330,7 @@ else
 
             Logger.LogInformation("Starting OPML import with {FeedCount} feeds", parseResult.Feeds.Count);
 
-            importProgress = new OpmlImportForm.ImportProgress
+            importProgress = new ImportFeed.ImportProgress
             {
                 Total = parseResult.Feeds.Count
             };
@@ -331,7 +395,7 @@ else
 
     private async Task<bool> ProcessOpmlFeedAsync(
         RssReaderContext context, 
-        OpmlImportService.OpmlFeed opmlFeed, 
+        OpmlHandler.OpmlFeed opmlFeed, 
         int defaultCategoryId,
         Dictionary<string, int> categoryCache)
     {
@@ -457,67 +521,58 @@ else
         return (newCategory.Id, true);
     }
 
-    private void ShowDeleteConfirmation(Feed feed)
+    private void ClearCategoryFilter()
     {
-        feedToDelete = feed;
-        showDeleteDialog = true;
+        _selectedCategoryId = null;
+        _filteredFeeds.Clear();
+    }
+
+    private void FilterByCategory(int categoryId)
+    {
+        if (_selectedCategoryId == categoryId)
+        {
+            ClearCategoryFilter();
+        }
+        else
+        {
+            _selectedCategoryId = categoryId;
+            ApplyCategoryFilter();
+        }
+    }
+
+    private void ApplyCategoryFilter()
+    {
+        if (_selectedCategoryId.HasValue)
+        {
+            _filteredFeeds = _allFeeds
+                .Where(f => f.CategoryId == _selectedCategoryId.Value)
+                .ToList();
+        }
+        else
+        {
+            _filteredFeeds.Clear();
+        }
+    }
+
+    private void OpenFeedManagement(Feed feed)
+    {
+        selectedFeedForManagement = feed;
+        isSidebarVisible = true;
         ClearAlerts();
     }
 
-    private void CancelDelete()
+    private async Task HandleFeedUpdated()
     {
-        showDeleteDialog = false;
-        feedToDelete = null;
+        await LoadCategoriesAsync();
+        await LoadFeedsAsync();
+        NotificationService.NotifyFeedsUpdated();
     }
 
-    private async Task ConfirmDelete()
+    private async Task HandleFeedDeleted()
     {
-        if (feedToDelete == null) return;
-
-        isDeleting = true;
-        deletingFeedId = feedToDelete.Id;
-
-        try
-        {
-            await using var context = await DbFactory.CreateDbContextAsync();
-            var feed = await context.Feed.FindAsync(feedToDelete.Id);
-
-            if (feed != null)
-            {
-                context.Feed.Remove(feed);
-                await context.SaveChangesAsync();
-
-                feedAlert = Alert.Success($"Feed '{feedToDelete.Title}' deleted successfully!");
-                await LoadFeedsAsync();
-                
-                NotificationService.NotifyFeedsUpdated();
-                
-                Logger.LogInformation("Successfully deleted feed: {FeedTitle} (ID: {FeedId})", feedToDelete.Title, feedToDelete.Id);
-            }
-            else
-            {
-                Logger.LogWarning("Attempted to delete non-existent feed: {FeedId}", feedToDelete.Id);
-                feedAlert = Alert.Error("Feed not found.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error deleting feed: {FeedId}", feedToDelete.Id);
-            feedAlert = Alert.Error($"An error occurred while deleting the feed: {ex.Message}");
-        }
-        finally
-        {
-            isDeleting = false;
-            deletingFeedId = null;
-            feedToDelete = null;
-            showDeleteDialog = false;
-        }
-    }
-
-    private string GetDeleteMessage()
-    {
-        return feedToDelete != null 
-            ? $"Are you sure you want to delete the feed {feedToDelete.Title}?" 
-            : string.Empty;
+        feedAlert = Alert.Success($"Feed deleted successfully!");
+        await LoadFeedsAsync();
+        NotificationService.NotifyFeedsUpdated();
+        selectedFeedForManagement = null;
     }
 }

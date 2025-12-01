@@ -1,24 +1,24 @@
 namespace RssReader.Services
 {
-    public class FeedUpdateBackgroundService : BackgroundService
+    public class FeedUpdater : BackgroundService
     {
         private readonly IServiceProvider _serviceProvider;
-        private readonly ILogger<FeedUpdateBackgroundService> _logger;
+        private readonly ILogger<FeedUpdater> _logger;
         private TimeSpan _updateInterval;
         private Timer? _timer;
 
-        public FeedUpdateBackgroundService(
+        public FeedUpdater(
             IServiceProvider serviceProvider,
-            ILogger<FeedUpdateBackgroundService> logger)
+            ILogger<FeedUpdater> logger)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
-            _updateInterval = TimeSpan.FromMinutes(SettingsService.DefaultFeedUpdateInterval);
+            _updateInterval = TimeSpan.FromMinutes(Settings.DefaultFeedUpdateInterval);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("FeedUpdateBackgroundService is starting");
+            _logger.LogInformation("FeedUpdater is starting");
 
             // Load interval from database
             await LoadUpdateIntervalAsync(stoppingToken);
@@ -46,7 +46,7 @@ namespace RssReader.Services
                 await Task.Delay(_updateInterval, stoppingToken);
             }
 
-            _logger.LogInformation("FeedUpdateBackgroundService is stopping");
+            _logger.LogInformation("FeedUpdater is stopping");
         }
 
         private async Task LoadUpdateIntervalAsync(CancellationToken cancellationToken)
@@ -54,7 +54,7 @@ namespace RssReader.Services
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var settingsService = scope.ServiceProvider.GetRequiredService<SettingsService>();
+                var settingsService = scope.ServiceProvider.GetRequiredService<Settings>();
 
                 var intervalMinutes = await settingsService.GetFeedUpdateIntervalAsync(cancellationToken);
                 _updateInterval = TimeSpan.FromMinutes(intervalMinutes);
@@ -64,14 +64,14 @@ namespace RssReader.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading update interval, using default");
-                _updateInterval = TimeSpan.FromMinutes(SettingsService.DefaultFeedUpdateInterval);
+                _updateInterval = TimeSpan.FromMinutes(Settings.DefaultFeedUpdateInterval);
             }
         }
 
         private async Task UpdateFeedsAsync(CancellationToken cancellationToken)
         {
             using var scope = _serviceProvider.CreateScope();
-            var feedService = scope.ServiceProvider.GetRequiredService<FeedService>();
+            var feedService = scope.ServiceProvider.GetRequiredService<FeedManager>();
 
             var result = await feedService.UpdateAllFeedsAsync(cancellationToken);
 

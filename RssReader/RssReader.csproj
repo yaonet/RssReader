@@ -10,6 +10,11 @@
 
   <ItemGroup>
     <Compile Remove="Models\FeedbackMessage.cs" />
+    <Compile Remove="Services\DataUpdateNotificationService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="RssReader.db" />
   </ItemGroup>
 
   <ItemGroup>

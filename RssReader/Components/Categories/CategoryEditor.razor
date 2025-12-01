@@ -1,0 +1,277 @@
+@using Microsoft.EntityFrameworkCore
+@using RssReader.Models
+@using RssReader.Data
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+@using System.ComponentModel.DataAnnotations
+@inject IDbContextFactory<RssReaderContext> DbFactory
+@inject ILogger<CategoryEditor> Logger
+
+<div class="offcanvas offcanvas-end @(IsVisible ? "show" : "")" 
+     tabindex="-1" 
+     style="@(IsVisible ? "visibility: visible;" : "")"
+     aria-labelledby="categoryManagementLabel">
+    <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="categoryManagementLabel">
+            <i class="bi bi-gear me-2"></i>Manage Category
+        </h5>
+        <button type="button" class="btn-close" @onclick="Close" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+        @if (CurrentCategory != null && !IsLoading)
+        {
+            <AlertDisplay @bind-Alert="alert" />
+
+            <EditForm Model="editModel" OnValidSubmit="HandleSave" FormName="editCategory">
+                <DataAnnotationsValidator />
+                
+                <div class="mb-3">
+                    <label for="categoryName" class="form-label">Category Name</label>
+                    <InputText id="categoryName" @bind-Value="editModel.Name" class="form-control" />
+                    <ValidationMessage For="() => editModel.Name" class="text-danger" />
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-primary" disabled="@IsSaving">
+                        @if (IsSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                            <span>Saving...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-save me-2"></i>
+                            <span>Save Changes</span>
+                        }
+                    </button>
+                    <button type="button" class="btn btn-outline-danger" @onclick="ShowDeleteConfirmation" disabled="@IsSaving">
+                        <i class="bi bi-trash me-2"></i>Delete Category
+                    </button>
+                </div>
+            </EditForm>
+        }
+        else if (IsLoading)
+        {
+            <div class="text-center my-4">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@if (IsVisible)
+{
+    <div class="offcanvas-backdrop fade show" @onclick="Close"></div>
+}
+
+<DeleteConfirmDialog IsVisible="@showDeleteDialog"
+                     Title="Confirm Delete"
+                     Message="@GetDeleteMessage()"
+                     Warning="@(GetDeleteWarning())"
+                     IsProcessing="@IsDeleting"
+                     OnConfirm="ConfirmDelete"
+                     OnCancel="CancelDeleteConfirmation" />
+
+@code {
+    [Parameter]
+    public bool IsVisible { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> IsVisibleChanged { get; set; }
+
+    [Parameter]
+    public Category? CurrentCategory { get; set; }
+
+    [Parameter]
+    public EventCallback OnCategoryUpdated { get; set; }
+
+    [Parameter]
+    public EventCallback OnCategoryDeleted { get; set; }
+
+    private CategoryEditModel editModel = new();
+    private bool IsLoading = false;
+    private bool IsSaving = false;
+    private bool IsDeleting = false;
+    private bool showDeleteDialog = false;
+    private Alert? alert;
+    private int feedCount = 0;
+
+    protected override void OnParametersSet()
+    {
+        if (CurrentCategory != null && IsVisible)
+        {
+            LoadCategoryData();
+        }
+    }
+
+    private async void LoadCategoryData()
+    {
+        editModel = new CategoryEditModel
+        {
+            Name = CurrentCategory?.Name ?? string.Empty
+        };
+        alert = null;
+
+        await LoadFeedCountAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadFeedCountAsync()
+    {
+        if (CurrentCategory == null) return;
+
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            feedCount = await context.Feed.CountAsync(f => f.CategoryId == CurrentCategory.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading feed count for category: {CategoryId}", CurrentCategory.Id);
+            feedCount = 0;
+        }
+    }
+
+    private async Task Close()
+    {
+        IsVisible = false;
+        await IsVisibleChanged.InvokeAsync(false);
+        alert = null;
+        showDeleteDialog = false;
+    }
+
+    private async Task HandleSave()
+    {
+        if (CurrentCategory == null) return;
+
+        IsSaving = true;
+        alert = null;
+
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            
+            var trimmedName = editModel.Name.Trim();
+            var exists = await context.Category.AnyAsync(c => 
+                c.Id != CurrentCategory.Id && 
+                c.Name!.ToLower() == trimmedName.ToLower());
+
+            if (exists)
+            {
+                alert = Alert.Error($"A category with the name '{trimmedName}' already exists.");
+                return;
+            }
+
+            var category = await context.Category.FindAsync(CurrentCategory.Id);
+
+            if (category == null)
+            {
+                alert = Alert.Error("Category not found.");
+                return;
+            }
+
+            category.Name = trimmedName;
+
+            context.Category.Update(category);
+            await context.SaveChangesAsync();
+
+            alert = Alert.Success("Category updated successfully!");
+            Logger.LogInformation("Successfully updated category: {CategoryId} - {CategoryName}", 
+                CurrentCategory.Id, category.Name);
+
+            await OnCategoryUpdated.InvokeAsync();
+            
+            await Task.Delay(1500);
+            await Close();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating category: {CategoryId}", CurrentCategory.Id);
+            alert = Alert.Error($"Failed to update category: {ex.Message}");
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+
+    private void ShowDeleteConfirmation()
+    {
+        showDeleteDialog = true;
+        alert = null;
+    }
+
+    private void CancelDeleteConfirmation()
+    {
+        showDeleteDialog = false;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (CurrentCategory == null) return;
+
+        IsDeleting = true;
+
+        try
+        {
+            await using var context = await DbFactory.CreateDbContextAsync();
+            var category = await context.Category.FindAsync(CurrentCategory.Id);
+
+            if (category != null)
+            {
+                context.Category.Remove(category);
+                await context.SaveChangesAsync();
+
+                Logger.LogInformation("Successfully deleted category: {CategoryId} - {CategoryName}", 
+                    CurrentCategory.Id, CurrentCategory.Name);
+                
+                await OnCategoryDeleted.InvokeAsync();
+                await Close();
+            }
+            else
+            {
+                alert = Alert.Error("Category not found.");
+            }
+        }
+        catch (DbUpdateException ex)
+        {
+            Logger.LogError(ex, "Error deleting category: {CategoryId}. Category may be in use.", CurrentCategory?.Id);
+            alert = Alert.Error("Cannot delete this category because it contains feeds. Please remove or reassign the feeds first.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting category: {CategoryId}", CurrentCategory?.Id);
+            alert = Alert.Error($"Failed to delete category: {ex.Message}");
+        }
+        finally
+        {
+            IsDeleting = false;
+            showDeleteDialog = false;
+        }
+    }
+
+    private string GetDeleteMessage()
+    {
+        return CurrentCategory != null
+            ? $"Are you sure you want to delete the category '{CurrentCategory.Name}'?"
+            : string.Empty;
+    }
+
+    private Alert? GetDeleteWarning()
+    {
+        if (feedCount > 0)
+        {
+            return Alert.Warning($"This category contains {feedCount} feed(s). You must remove or reassign these feeds before deleting this category.");
+        }
+        return null;
+    }
+
+    public class CategoryEditModel
+    {
+        [Required(ErrorMessage = "Category name is required")]
+        [StringLength(30, MinimumLength = 2, ErrorMessage = "Category name must be between 2 and 30 characters")]
+        public string Name { get; set; } = string.Empty;
+    }
+}

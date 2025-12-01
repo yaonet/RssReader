@@ -29,15 +29,15 @@ builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
 
 // Add notification services
-builder.Services.AddSingleton<DataUpdateNotificationService>();
+builder.Services.AddSingleton<UpdateNotifier>();
 
 // Add application services
-builder.Services.AddScoped<OpmlImportService>();
-builder.Services.AddScoped<SettingsService>();
-builder.Services.AddScoped<FeedService>();
+builder.Services.AddScoped<OpmlHandler>();
+builder.Services.AddScoped<Settings>();
+builder.Services.AddScoped<FeedManager>();
 
 // Add background service for scheduled feed updates
-builder.Services.AddHostedService<FeedUpdateBackgroundService>();
+builder.Services.AddHostedService<FeedUpdater>();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -56,7 +56,7 @@ using (var scope = app.Services.CreateScope())
 // Initialize default settings
 using (var scope = app.Services.CreateScope())
 {
-    var settingsService = scope.ServiceProvider.GetRequiredService<SettingsService>();
+    var settingsService = scope.ServiceProvider.GetRequiredService<Settings>();
     await settingsService.InitializeDefaultSettingsAsync();
 }
 

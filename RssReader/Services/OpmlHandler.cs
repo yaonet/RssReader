@@ -1,11 +1,20 @@
 using System.Xml;
 using System.Xml.Linq;
 using RssReader.Models;
+using Microsoft.EntityFrameworkCore;
+using RssReader.Data;
 
 namespace RssReader.Services
 {
-    public class OpmlImportService
+    public class OpmlHandler
     {
+        private readonly IDbContextFactory<RssReaderContext> _dbFactory;
+
+        public OpmlHandler(IDbContextFactory<RssReaderContext> dbFactory)
+        {
+            _dbFactory = dbFactory;
+        }
+
         public class OpmlFeed
         {
             public string? Title { get; set; }
@@ -65,6 +74,62 @@ namespace RssReader.Services
             }
 
             return result;
+        }
+
+        public async Task<string> ExportOpmlAsync()
+        {
+            await using var context = await _dbFactory.CreateDbContextAsync();
+            
+            var feeds = await context.Feed
+                .Include(f => f.Category)
+                .OrderBy(f => f.Category!.Name)
+                .ThenBy(f => f.Title)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var feedsByCategory = feeds.GroupBy(f => f.Category?.Name ?? "Uncategorized");
+
+            var opml = new XDocument(
+                new XDeclaration("1.0", "utf-8", null),
+                new XElement("opml",
+                    new XAttribute("version", "2.0"),
+                    new XElement("head",
+                        new XElement("title", "RSS Reader Feeds"),
+                        new XElement("dateCreated", DateTime.UtcNow.ToString("R"))
+                    ),
+                    new XElement("body",
+                        feedsByCategory.Select(category =>
+                            new XElement("outline",
+                                new XAttribute("text", category.Key),
+                                new XAttribute("title", category.Key),
+                                category.Select(feed =>
+                                    new XElement("outline",
+                                        new XAttribute("type", "rss"),
+                                        new XAttribute("text", feed.Title ?? "Untitled"),
+                                        new XAttribute("title", feed.Title ?? "Untitled"),
+                                        new XAttribute("xmlUrl", feed.Url ?? ""),
+                                        feed.Link != null ? new XAttribute("htmlUrl", feed.Link) : null
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+
+            var settings = new XmlWriterSettings
+            {
+                Indent = true,
+                Async = true,
+                OmitXmlDeclaration = false
+            };
+
+            using var stringWriter = new StringWriter();
+            await using var xmlWriter = XmlWriter.Create(stringWriter, settings);
+            await opml.SaveAsync(xmlWriter, CancellationToken.None);
+            await xmlWriter.FlushAsync();
+
+            return stringWriter.ToString();
         }
 
         private string? GetCategoryFromOutline(XElement outline)

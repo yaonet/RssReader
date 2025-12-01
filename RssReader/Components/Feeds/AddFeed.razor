@@ -26,7 +26,7 @@
                     <InputText id="url" @bind-Value="Input.Url" class="form-control" placeholder="https://example.com/feed" disabled="@IsLoading" />
                     <ValidationMessage For="() => Input.Url" class="text-danger" />
                 </div>
-                <div class="col-md-2">
+                <div class="col-md-3">
                     <button type="submit" class="btn btn-primary w-100" disabled="@IsLoading">
                         @if (IsLoading)
                         {

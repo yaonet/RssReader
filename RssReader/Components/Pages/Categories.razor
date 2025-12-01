@@ -9,11 +9,9 @@
 @using RssReader.Components.Shared
 @using System.ComponentModel.DataAnnotations;
 @inject IDbContextFactory<RssReader.Data.RssReaderContext> DbFactory
-@inject DataUpdateNotificationService NotificationService
+@inject UpdateNotifier NotificationService
 
 <PageTitle>Categories</PageTitle>
-
-<h1>Categories</h1>
 
 <AlertDisplay @bind-Alert="alert" />
 
@@ -57,25 +55,20 @@ else
 {
     <QuickGrid Class="table" Items="allCategories.AsQueryable()">
         <PropertyColumn Property="category => category.Name" Title="Category" />
-        <TemplateColumn Title="Actions">
-            <button class="btn btn-sm btn-danger" 
-                    @onclick="() => DeleteCategory(context)"
-                    @onclick:stopPropagation="true"
-                    disabled="@isDeleting"
-                    aria-label="@($"Delete category {context.Name}")">
-               Delete
+        <TemplateColumn Title="" Context="category">
+            <button class="btn btn-sm btn-link p-0 border-0 text-primary" 
+                    @onclick="() => OpenCategoryManagement(category)"
+                    aria-label="@($"Manage category {category.Name}")">
+                <i class="bi bi-gear-fill"></i>
             </button>
         </TemplateColumn>
     </QuickGrid>
 }
 
-<DeleteConfirmDialog IsVisible="@showDeleteConfirmation"
-                     Title="Confirm Delete"
-                     Message="@GetDeleteMessage()"
-                     Warning="@GetWarning()"
-                     IsProcessing="@isDeleting"
-                     OnConfirm="ConfirmDelete"
-                     OnCancel="CancelDelete" />
+<RssReader.Components.Categories.CategoryEditor @bind-IsVisible="isSidebarVisible"
+                                                  CurrentCategory="selectedCategoryForManagement"
+                                                  OnCategoryUpdated="HandleCategoryUpdated"
+                                                  OnCategoryDeleted="HandleCategoryDeleted" />
 
 @code {
     [SupplyParameterFromForm]
@@ -83,12 +76,10 @@ else
 
     private Alert? alert;
     private List<Category> allCategories = new();
-    private bool showDeleteConfirmation = false;
-    private Category? categoryToDelete = null;
-    private int feedCount = 0;
-    private bool isDeleting = false;
     private bool isLoading = false;
     private bool isLoadingCategories = true;
+    private bool isSidebarVisible = false;
+    private Category? selectedCategoryForManagement = null;
 
     private sealed class InputModel
     {
@@ -168,86 +159,24 @@ else
         }
     }
 
-    private async Task DeleteCategory(Category category)
+    private void OpenCategoryManagement(Category category)
     {
-        categoryToDelete = category;
-        
-        try
-        {
-            await using var context = await DbFactory.CreateDbContextAsync();
-            feedCount = await context.Feed.CountAsync(f => f.CategoryId == category.Id);
-            
-            showDeleteConfirmation = true;
-        }
-        catch (Exception ex)
-        {
-            alert = Alert.Error($"Failed to check category feeds: {ex.Message}");
-            ResetDeleteState();
-        }
+        selectedCategoryForManagement = category;
+        isSidebarVisible = true;
+        alert = null;
     }
 
-    private async Task ConfirmDelete()
+    private async Task HandleCategoryUpdated()
     {
-        if (categoryToDelete == null) return;
-
-        isDeleting = true;
-        
-        try
-        {
-            await using var context = await DbFactory.CreateDbContextAsync();
-            
-            var category = await context.Category.FindAsync(categoryToDelete.Id);
-            if (category != null)
-            {
-                context.Category.Remove(category);
-                await context.SaveChangesAsync();
-                
-                alert = Alert.Success($"Category '{categoryToDelete.Name}' deleted successfully.");
-                
-                await LoadCategoriesAsync();
-                
-                NotificationService.NotifyCategoriesUpdated();
-            }
-            else
-            {
-                alert = Alert.Error($"Category not found. It may have been already deleted.");
-            }
-        }
-        catch (Exception ex)
-        {
-            alert = Alert.Error($"Error deleting category: {ex.Message}");
-        }
-        finally
-        {
-            isDeleting = false;
-            ResetDeleteState();
-        }
+        await LoadCategoriesAsync();
+        NotificationService.NotifyCategoriesUpdated();
     }
 
-    private void CancelDelete()
+    private async Task HandleCategoryDeleted()
     {
-        ResetDeleteState();
-    }
-
-    private void ResetDeleteState()
-    {
-        showDeleteConfirmation = false;
-        categoryToDelete = null;
-        feedCount = 0;
-    }
-
-    private string GetDeleteMessage()
-    {
-        return categoryToDelete != null 
-            ? $"Are you sure you want to delete the category '{categoryToDelete.Name}'?" 
-            : string.Empty;
-    }
-
-    private Alert? GetWarning()
-    {
-        if (categoryToDelete == null || feedCount == 0)
-            return null;
-
-        return Alert.Warning($"This category has {feedCount} feed(s). Deleting it will also remove all associated feeds and articles.");
+        alert = Alert.Success($"Category deleted successfully!");
+        await LoadCategoriesAsync();
+        NotificationService.NotifyCategoriesUpdated();
+        selectedCategoryForManagement = null;
     }
 }

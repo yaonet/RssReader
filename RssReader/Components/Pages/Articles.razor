@@ -11,97 +11,150 @@
 @using RssReader.Components.Articles
 @implements IDisposable
 @inject IDbContextFactory<RssReader.Data.RssReaderContext> DbFactory
-@inject DataUpdateNotificationService NotificationService
+@inject UpdateNotifier NotificationService
 @inject ILogger<Articles> Logger
-@inject FeedService FeedService
+@inject FeedManager FeedService
 
-<PageTitle>Articles</PageTitle>
-
-<h1>Articles</h1>
+<PageTitle>RssReader</PageTitle>
 
 <AlertDisplay @bind-Alert="_alert" />
 
-<div class="mb-3 row">
-    <div class="col-md-3 col-lg-2">
-        <input type="search" 
-               class="form-control" 
-               @bind="_titleFilter" 
-               @bind:event="oninput" 
-               placeholder="Search by article title or feed name" 
-               aria-label="Search articles by title or feed name" />
+@if (_updateProgress != null && _isProcessing)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">
+                    <i class="bi bi-arrow-clockwise"></i> Updating Feeds
+                </h6>
+                <span class="badge bg-primary">@_updateProgress.Percentage%</span>
+            </div>
+            <div class="progress mb-2" style="height: 25px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" 
+                     style="width: @(_updateProgress.Percentage)%"
+                     aria-valuenow="@_updateProgress.Percentage" 
+                     aria-valuemin="0" 
+                     aria-valuemax="100">
+                    @_updateProgress.ProcessedFeeds / @_updateProgress.TotalFeeds
+                </div>
+            </div>
+            <div class="d-flex justify-content-between text-muted small">
+                <span>
+                    @if (!string.IsNullOrEmpty(_updateProgress.CurrentFeedTitle))
+                    {
+                        <span>Current: @_updateProgress.CurrentFeedTitle</span>
+                    }
+                </span>
+                <span>
+                    <span class="text-success me-2">? @_updateProgress.SuccessfulFeeds</span>
+                    @if (_updateProgress.FailedFeeds > 0)
+                    {
+                        <span class="text-danger">? @_updateProgress.FailedFeeds</span>
+                    }
+                </span>
+            </div>
+        </div>
     </div>
-    
-    <div class="col-md-9 col-lg-10 d-flex align-items-center gap-2 flex-wrap">
-        <div class="btn-group" role="group" aria-label="Filter articles">
-            <button type="button" 
-                    class="btn btn-sm @(_readFilter == ReadFilter.Unread ? "btn-primary" : "btn-outline-secondary")"
-                    @onclick="() => SetReadFilter(ReadFilter.Unread)"
-                    title="Show unread articles">
-                <i class="bi bi-envelope"></i> Unread
-            </button>
-            <button type="button" 
-                    class="btn btn-sm @(_readFilter == ReadFilter.Read ? "btn-primary" : "btn-outline-secondary")"
-                    @onclick="() => SetReadFilter(ReadFilter.Read)"
-                    title="Show read articles">
-                <i class="bi bi-envelope-open"></i> Read
-            </button>
-            <button type="button" 
-                    class="btn btn-sm @(_favoriteFilter == FavoriteFilter.Favorite ? "btn-primary" : "btn-outline-secondary")"
-                    @onclick="() => SetFavoriteFilter(FavoriteFilter.Favorite)"
-                    title="Show favorite articles">
-                <i class="bi bi-star-fill"></i> Favorite
-            </button>
-            <button type="button" 
-                    class="btn btn-sm @(_favoriteFilter == FavoriteFilter.NonFavorite ? "btn-primary" : "btn-outline-secondary")"
-                    @onclick="() => SetFavoriteFilter(FavoriteFilter.NonFavorite)"
-                    title="Show non-favorite articles">
-                <i class="bi bi-star"></i> Non-Favorite
-            </button>
+}
+
+<div class="mb-4">
+    <div class="row g-3">
+        <div class="col-12 col-md-4 col-lg-3">
+            <div class="input-group">
+                <span class="input-group-text bg-light border-end-0">
+                    <i class="bi bi-search"></i>
+                </span>
+                <input type="search" 
+                       class="form-control border-start-0 ps-0" 
+                       @bind="_titleFilter" 
+                       @bind:event="oninput" 
+                       placeholder="Search articles..." 
+                       aria-label="Search articles by title or feed name" />
+            </div>
         </div>
         
-        @if (_readFilter != ReadFilter.All || _favoriteFilter != FavoriteFilter.All)
-        {
-            <button type="button" 
-                    class="btn btn-sm btn-outline-secondary"
-                    @onclick="ClearFilters"
-                    title="Clear all filters">
-                <i class="bi bi-x-circle"></i> Clear Filters
-            </button>
-        }
-        
-        <div class="btn-group" role="group" aria-label="Article actions">
-            <button type="button" 
-                    class="btn btn-sm btn-outline-primary"
-                    @onclick="MarkAllAsRead"
-                    disabled="@_isProcessing"
-                    title="Mark all visible articles as read">
-                <i class="bi bi-check-all"></i> Mark All Read
-            </button>
-            <button type="button" 
-                    class="btn btn-sm btn-outline-success"
-                    @onclick="UpdateAllFeeds"
-                    disabled="@_isProcessing"
-                    title="Update all feeds">
-                @if (_isProcessing)
+        <div class="col-12 col-md-8 col-lg-9">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <div class="btn-group shadow-sm" role="group" aria-label="Filter articles">
+                    <button type="button" 
+                            class="btn btn-sm @(_readFilter == ReadFilter.Unread ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => SetReadFilter(ReadFilter.Unread)"
+                            title="Show unread articles">
+                        <i class="bi bi-envelope me-1"></i>Unread
+                    </button>
+                    <button type="button" 
+                            class="btn btn-sm @(_readFilter == ReadFilter.Read ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => SetReadFilter(ReadFilter.Read)"
+                            title="Show read articles">
+                        <i class="bi bi-envelope-open me-1"></i>Read
+                    </button>
+                    <button type="button" 
+                            class="btn btn-sm @(_favoriteFilter == FavoriteFilter.Favorite ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => SetFavoriteFilter(FavoriteFilter.Favorite)"
+                            title="Show favorite articles">
+                        <i class="bi bi-star-fill me-1"></i>Favorites
+                    </button>
+                    <button type="button" 
+                            class="btn btn-sm @(_favoriteFilter == FavoriteFilter.NonFavorite ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => SetFavoriteFilter(FavoriteFilter.NonFavorite)"
+                            title="Show non-favorite articles">
+                        <i class="bi bi-star me-1"></i>Non-Favorites
+                    </button>
+                </div>
+                
+                @if (_readFilter != ReadFilter.All || _favoriteFilter != FavoriteFilter.All)
                 {
-                    <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                    <button type="button" 
+                            class="btn btn-sm btn-outline-danger"
+                            @onclick="ClearFilters"
+                            title="Clear all filters">
+                        <i class="bi bi-x-circle me-1"></i>Clear
+                    </button>
                 }
-                else
-                {
-                    <i class="bi bi-arrow-clockwise"></i>
-                }
-                Update Feeds
-            </button>
+                
+                <div class="ms-auto d-flex gap-2">
+                    <button type="button" 
+                            class="btn btn-sm btn-outline-primary shadow-sm"
+                            @onclick="MarkAllAsRead"
+                            disabled="@_isProcessing"
+                            title="Mark all visible articles as read">
+                        <i class="bi bi-check-all me-1"></i>Mark All Read
+                    </button>
+                    <button type="button" 
+                            class="btn btn-sm btn-success shadow-sm"
+                            @onclick="UpdateAllFeeds"
+                            disabled="@_isProcessing"
+                            title="Update all feeds">
+                        @if (_isProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-clockwise me-1"></i>
+                        }
+                        Update Feeds
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
     
     @if (!string.IsNullOrEmpty(_filterInfo))
     {
-        <div class="col-12 mt-2">
-            <span class="text-muted me-2">
-                <i class="bi bi-funnel me-1"></i>@_filterInfo
-            </span>
-            <a href="/articles" class="btn btn-sm btn-outline-secondary">Clear</a>
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="alert alert-info d-flex align-items-center justify-content-between py-2 mb-0" role="alert">
+                    <span>
+                        <i class="bi bi-funnel-fill me-2"></i>
+                        <strong>Active Filter:</strong> @_filterInfo
+                    </span>
+                    <a href="/articles" class="btn btn-sm btn-outline-info">
+                        <i class="bi bi-x-lg me-1"></i>Clear
+                    </a>
+                </div>
+            </div>
         </div>
     }
 </div>
@@ -123,56 +176,73 @@ else if (!_articles.Any())
 else
 {
     <div class="table-responsive">
-        <QuickGrid Class="table" Items="FilteredArticles" Pagination="_pagination">
+        <QuickGrid Class="table article-grid" Items="FilteredArticles" Pagination="@GetPaginationState()">
             <TemplateColumn Title="Feed" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.FeedTitle ?? string.Empty))">
-                @if (!string.IsNullOrEmpty(context.FeedTitle))
-                {
-                    <FeedIcon ImageUrl="@context.FeedImageUrl" Title="@context.FeedTitle" />
-                    <a href="@context.FeedLink" target="_blank" rel="noopener noreferrer">@context.FeedTitle</a>
-                }
-                else
-                {
-                    <span class="text-muted">Unknown Feed</span>
-                }
+                <div class="@(context.IsRead ? "" : "article-row-unread")">
+                    @if (!string.IsNullOrEmpty(context.FeedTitle))
+                    {
+                        <FeedIcon ImageUrl="@context.FeedImageUrl" Title="@context.FeedTitle" />
+                        <a href="@GetFeedFilterUrl(context.FeedId)" class="text-decoration-none">@context.FeedTitle</a>
+                    }
+                    else
+                    {
+                        <span class="text-muted">Unknown Feed</span>
+                    }
+                </div>
             </TemplateColumn>
             <TemplateColumn Title="Title" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.Title))">
-                <button class="btn btn-link text-start p-0 text-decoration-none" 
-                        @onclick="() => ShowArticleContent(context)"
-                        style="color: inherit;"
-                        aria-label="@($"Read article: {context.Title}")">
-                    @context.Title
-                </button>
+                <div class="@(context.IsRead ? "" : "article-row-unread")">
+                    <button class="btn btn-link text-start p-0 text-decoration-none" 
+                            @onclick="() => ShowArticleContent(context)"
+                            style="color: inherit;"
+                            aria-label="@($"Read article: {context.Title}")">
+                        @context.Title
+                    </button>
+                </div>
             </TemplateColumn>
             <TemplateColumn Title="">
-                <button class="btn btn-sm btn-link p-0 border-0" 
-                        @onclick="() => ToggleReadStatus(context)"
-                        title="@(context.IsRead ? "Mark as unread" : "Mark as read")"
-                        aria-label="@(context.IsRead ? "Mark as unread" : "Mark as read")">
-                    <i class="bi @(context.IsRead ? "bi-envelope-open icon-read" : "bi-envelope icon-unread")"></i>
-                </button>
+                <div class="@(context.IsRead ? "" : "article-row-unread")">
+                    <button class="btn btn-sm btn-link p-0 border-0" 
+                            @onclick="() => ToggleReadStatus(context)"
+                            title="@(context.IsRead ? "Mark as unread" : "Mark as read")"
+                            aria-label="@(context.IsRead ? "Mark as unread" : "Mark as read")">
+                        <i class="bi @(context.IsRead ? "bi-envelope-open icon-read" : "bi-envelope icon-unread")"></i>
+                    </button>
+                </div>
             </TemplateColumn>
             <TemplateColumn Title="">
-                <button class="btn btn-sm btn-link p-0 border-0" 
-                        @onclick="() => ToggleFavoriteStatus(context)"
-                        title="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")"
-                        aria-label="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")">
-                    <i class="bi @(context.IsFavorite ? "bi-star-fill icon-favorite-filled" : "bi-star icon-favorite")"></i>
-                </button>
+                <div class="@(context.IsRead ? "" : "article-row-unread")">
+                    <button class="btn btn-sm btn-link p-0 border-0" 
+                            @onclick="() => ToggleFavoriteStatus(context)"
+                            title="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")"
+                            aria-label="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+                        <i class="bi @(context.IsFavorite ? "bi-star-fill icon-favorite-filled" : "bi-star icon-favorite")"></i>
+                    </button>
+                </div>
             </TemplateColumn>
             <TemplateColumn Title="">
-                <a href="@context.Link" 
-                   target="_blank" 
-                   rel="noopener noreferrer" 
-                   class="btn btn-sm btn-link" 
-                   title="Read on source website"
-                   aria-label="@($"Read {context.Title} on source website")">
-                    <i class="bi bi-box-arrow-up-right icon-external-link"></i>
-                </a>
+                <div class="@(context.IsRead ? "" : "article-row-unread")">
+                    <a href="@context.Link" 
+                       target="_blank" 
+                       rel="noopener noreferrer" 
+                       class="btn btn-sm btn-link" 
+                       title="Read on source website"
+                       aria-label="@($"Read {context.Title} on source website")">
+                        <i class="bi bi-box-arrow-up-right icon-external-link"></i>
+                    </a>
+                </div>
             </TemplateColumn>
-            <PropertyColumn Property="@(a => a.PublishDate)" Format="yyyy-MM-dd HH:mm" Title="PublishDate" Sortable="true"/>
+            <TemplateColumn Title="PublishDate" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.PublishDate))" Class="d-none d-md-table-cell">
+                <div class="@(context.IsRead ? "" : "article-row-unread")">
+                    @context.PublishDate.ToString("yyyy-MM-dd HH:mm")
+                </div>
+            </TemplateColumn>
         </QuickGrid>
     </div>
-    <Paginator State="_pagination" />
+    @if (FilteredArticles.Count() > DefaultItemsPerPage)
+    {
+        <Paginator State="_pagination" />
+    }
 }
 
 <ArticleViewer Article="_selectedArticle"
@@ -201,6 +271,7 @@ else
     private bool _isProcessing = false;
     private ReadFilter _readFilter = ReadFilter.All;
     private FavoriteFilter _favoriteFilter = FavoriteFilter.All;
+    private FeedUpdateProgress? _updateProgress = null;
 
     [SupplyParameterFromQuery(Name = "categoryId")]
     public int? CategoryId { get; set; }
@@ -248,6 +319,7 @@ else
     {
         NotificationService.OnFeedsUpdated += HandleFeedsUpdated;
         NotificationService.OnCategoriesUpdated += HandleCategoriesUpdated;
+        NotificationService.OnFeedUpdateProgress += HandleFeedUpdateProgress;
         
         await LoadArticlesAsync();
     }
@@ -549,6 +621,28 @@ else
         }
     }
 
+    private async void HandleFeedUpdateProgress(FeedUpdateProgress progress)
+    {
+        if (_disposed) return;
+
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                _updateProgress = progress;
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Component disposed
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling feed update progress event");
+        }
+    }
+
     private void SetReadFilter(ReadFilter filter)
     {
         if (_readFilter == filter)
@@ -633,19 +727,36 @@ else
         try
         {
             _isProcessing = true;
+            _updateProgress = null;
             _alert = Alert.Info("Updating all feeds...");
             
-            await FeedService.UpdateAllFeedsAsync();
+            var result = await FeedService.UpdateAllFeedsAsync();
+            
+            _updateProgress = null;
             
             await LoadArticlesAsync();
             
-            _alert = Alert.Success("All feeds updated successfully.");
-            Logger.LogInformation("All feeds updated successfully");
+            if (result.FailedUpdates == 0)
+            {
+                _alert = Alert.Success($"All {result.SuccessfulUpdates} feed(s) updated successfully.");
+            }
+            else if (result.SuccessfulUpdates == 0)
+            {
+                _alert = Alert.Error($"Failed to update all {result.FailedUpdates} feed(s). Check logs for details.");
+            }
+            else
+            {
+                _alert = Alert.Warning($"Updated {result.SuccessfulUpdates} feed(s) successfully, but {result.FailedUpdates} feed(s) failed. Check logs for details.");
+            }
+            
+            Logger.LogInformation("Feed update completed: {Success} successful, {Failed} failed", 
+                result.SuccessfulUpdates, result.FailedUpdates);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to update all feeds");
             _alert = Alert.Error($"Failed to update feeds: {ex.Message}");
+            _updateProgress = null;
         }
         finally
         {
@@ -658,5 +769,16 @@ else
         _disposed = true;
         NotificationService.OnFeedsUpdated -= HandleFeedsUpdated;
         NotificationService.OnCategoriesUpdated -= HandleCategoriesUpdated;
+        NotificationService.OnFeedUpdateProgress -= HandleFeedUpdateProgress;
+    }
+
+    private string GetFeedFilterUrl(int feedId)
+    {
+        return $"/articles?feedId={feedId}";
+    }
+    
+    private PaginationState? GetPaginationState()
+    {
+        return FilteredArticles.Count() > DefaultItemsPerPage ? _pagination : null;
     }
 }

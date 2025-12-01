@@ -5,7 +5,7 @@
 @using RssReader.ViewModels
 @using RssReader.Components.Shared
 @using System.ComponentModel.DataAnnotations
-@inject SettingsService SettingsService
+@inject Settings SettingsService
 @inject ILogger<Setting> Logger
 
 <PageTitle>Settings</PageTitle>
@@ -80,7 +80,7 @@
                         </tr>
                         <tr>
                             <td><strong>Default Interval:</strong></td>
-                            <td>@SettingsService.DefaultFeedUpdateInterval minutes</td>
+                            <td>@Settings.DefaultFeedUpdateInterval minutes</td>
                         </tr>
                     </tbody>
                 </table>
@@ -94,7 +94,7 @@
     
     private Alert? _alert;
     private bool _isLoading = false;
-    private int _currentInterval = SettingsService.DefaultFeedUpdateInterval;
+    private int _currentInterval = Settings.DefaultFeedUpdateInterval;
 
     protected override async Task OnInitializedAsync()
     {
@@ -161,7 +161,7 @@
 
     private async Task HandleReset()
     {
-        _input.UpdateIntervalMinutes = SettingsService.DefaultFeedUpdateInterval;
+        _input.UpdateIntervalMinutes = Settings.DefaultFeedUpdateInterval;
         await HandleSaveSettings();
     }
 
@@ -183,6 +183,6 @@
     {
         [Required]
         [Range(1, 1440, ErrorMessage = "Update interval must be between 1 and 1440 minutes (1 minute to 24 hours).")]
-        public int UpdateIntervalMinutes { get; set; } = SettingsService.DefaultFeedUpdateInterval;
+        public int UpdateIntervalMinutes { get; set; } = Settings.DefaultFeedUpdateInterval;
     }
 }
