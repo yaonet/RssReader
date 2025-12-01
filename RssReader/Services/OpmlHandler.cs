@@ -1,5 +1,6 @@
 using System.Xml;
 using System.Xml.Linq;
+using System.Text;
 using RssReader.Models;
 using Microsoft.EntityFrameworkCore;
 using RssReader.Data;
@@ -36,14 +37,20 @@ namespace RssReader.Services
 
             try
             {
+                using var memoryStream = new MemoryStream();
+                await opmlStream.CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+
                 var settings = new XmlReaderSettings
                 {
                     DtdProcessing = DtdProcessing.Prohibit,
                     XmlResolver = null,
-                    Async = true
+                    Async = true,
+                    IgnoreWhitespace = true,
+                    CheckCharacters = false
                 };
 
-                using var reader = XmlReader.Create(opmlStream, settings);
+                using var reader = XmlReader.Create(memoryStream, settings);
                 var document = await XDocument.LoadAsync(reader, LoadOptions.None, CancellationToken.None);
                 var outlines = document.Descendants("outline");
 
@@ -90,7 +97,7 @@ namespace RssReader.Services
             var feedsByCategory = feeds.GroupBy(f => f.Category?.Name ?? "Uncategorized");
 
             var opml = new XDocument(
-                new XDeclaration("1.0", "utf-8", null),
+                new XDeclaration("1.0", "UTF-8", "yes"),
                 new XElement("opml",
                     new XAttribute("version", "2.0"),
                     new XElement("head",
@@ -121,10 +128,11 @@ namespace RssReader.Services
             {
                 Indent = true,
                 Async = true,
+                Encoding = new UTF8Encoding(false),
                 OmitXmlDeclaration = false
             };
 
-            using var stringWriter = new StringWriter();
+            using var stringWriter = new Utf8StringWriter();
             await using var xmlWriter = XmlWriter.Create(stringWriter, settings);
             await opml.SaveAsync(xmlWriter, CancellationToken.None);
             await xmlWriter.FlushAsync();
@@ -145,6 +153,11 @@ namespace RssReader.Services
                 parent = parent.Parent;
             }
             return null;
+        }
+
+        private class Utf8StringWriter : StringWriter
+        {
+            public override Encoding Encoding => new UTF8Encoding(false);
         }
     }
 }
