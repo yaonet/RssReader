@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="RssReader.Tray/RssReader.Tray.csproj" />
   <Project Path="RssReader/RssReader.csproj" />
 </Solution>
