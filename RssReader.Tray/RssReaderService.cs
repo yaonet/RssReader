@@ -82,14 +82,24 @@ public class RssReaderService
                 return false;
             }
 
-            if (_process != null)
+            var process = _process;
+            if (process != null && !process.HasExited)
             {
-                Log.Information("Stopping RssReader (PID: {ProcessId})", _process.Id);
+                var processId = process.Id;
+                Log.Information("Stopping RssReader (PID: {ProcessId})", processId);
                 
-                _process.Kill(entireProcessTree: true);
-                _process.WaitForExit(5000);
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(5000);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Process already exited, ignore
+                    Log.Information("Process already exited");
+                }
                 
-                _process.Dispose();
+                process.Dispose();
                 _process = null;
                 
                 Log.Information("RssReader stopped successfully");

@@ -54,6 +54,18 @@ public class TrayApplicationContext : ApplicationContext
 
         UpdateMenuItems();
 
+        // Auto-start the service
+        try
+        {
+            Log.Information("Auto-starting RssReader service");
+            _service.Start();
+            UpdateMenuItems();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error auto-starting RssReader service");
+        }
+
         Log.Information("TrayApplicationContext initialized");
     }
 

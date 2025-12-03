@@ -53,6 +53,7 @@ try
     builder.Services.AddScoped<OpmlHandler>();
     builder.Services.AddScoped<Settings>();
     builder.Services.AddScoped<FeedManager>();
+    builder.Services.AddScoped<ArticleQueryService>();
 
     // Add background service for scheduled feed updates
     builder.Services.AddHostedService<FeedUpdater>();
