@@ -90,7 +90,7 @@
 </div>
 
 @code {
-    private SettingsInputModel _input { get; set; }
+    private SettingsInputModel _input = null!;
     
     private Alert? _alert;
     private bool _isLoading = false;
@@ -98,13 +98,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadSettingsAsync();
-    }
-
-    protected override void OnInitialized()
-    {
         _input = new SettingsInputModel();
-        base.OnInitialized();
+        await LoadSettingsAsync();
     }
 
     private async Task LoadSettingsAsync()

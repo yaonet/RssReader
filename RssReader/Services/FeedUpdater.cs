@@ -5,7 +5,6 @@ namespace RssReader.Services
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<FeedUpdater> _logger;
         private TimeSpan _updateInterval;
-        private Timer? _timer;
 
         public FeedUpdater(
             IServiceProvider serviceProvider,
@@ -95,7 +94,6 @@ namespace RssReader.Services
 
         public override void Dispose()
         {
-            _timer?.Dispose();
             base.Dispose();
         }
     }

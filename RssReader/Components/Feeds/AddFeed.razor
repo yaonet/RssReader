@@ -57,10 +57,17 @@
     [Parameter]
     public EventCallback<Alert?> AlertChanged { get; set; }
 
+#pragma warning disable BL0007 // Component parameter should be auto property
     [SupplyParameterFromForm]
-    private InputModel Input { get; set; } = new();
+    private InputModel Input { get; set; } = null!;
+#pragma warning restore BL0007
 
     private bool IsLoading { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Input ??= new InputModel();
+    }
 
     private async Task OnSubmit()
     {

@@ -183,11 +183,13 @@ public class ArticleQueryService
                 foreach (var keyword in keywords)
                 {
                     var k = keyword;
+#pragma warning disable CS8602 // Dereference of a possibly null reference - safe in EF query context
                     query = query.Where(a =>
-                        a.Title.Contains(k) ||
-                        (a.Feed != null && a.Feed.Title.Contains(k)) ||
+                        (a.Title != null && a.Title.Contains(k)) ||
+                        (a.Feed != null && a.Feed.Title != null && a.Feed.Title.Contains(k)) ||
                         (a.Content != null && a.Content.Contains(k)) ||
                         (a.Author != null && a.Author.Contains(k)));
+#pragma warning restore CS8602
                 }
             }
         }
