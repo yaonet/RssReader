@@ -23,6 +23,7 @@ public class ArticleQueryService
         int? categoryId = null,
         bool? isRead = null,
         bool? isFavorite = null,
+        string? searchTerm = null,
         int skip = 0,
         int take = 100)
     {
@@ -33,24 +34,7 @@ public class ArticleQueryService
             var query = context.Set<Article>()
                 .AsNoTracking();
 
-            if (feedId.HasValue && feedId.Value > 0)
-            {
-                query = query.Where(a => a.FeedId == feedId.Value);
-            }
-            else if (categoryId.HasValue && categoryId.Value > 0)
-            {
-                query = query.Where(a => a.Feed!.CategoryId == categoryId.Value);
-            }
-
-            if (isRead.HasValue)
-            {
-                query = query.Where(a => a.IsRead == isRead.Value);
-            }
-
-            if (isFavorite.HasValue)
-            {
-                query = query.Where(a => a.IsFavorite == isFavorite.Value);
-            }
+            query = ApplyFilters(query, feedId, categoryId, isRead, isFavorite, searchTerm);
 
             var articles = await query
                 .OrderBy(a => a.IsRead)
@@ -81,7 +65,7 @@ public class ArticleQueryService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error querying articles. FeedId: {FeedId}, CategoryId: {CategoryId}, Skip: {Skip}, Take: {Take}", 
+            _logger.LogError(ex, "Error querying articles. FeedId: {FeedId}, CategoryId: {CategoryId}, Skip: {Skip}, Take: {Take}",
                 feedId, categoryId, skip, take);
             return new ArticleQueryResult
             {
@@ -97,7 +81,7 @@ public class ArticleQueryService
         try
         {
             await using var context = await _dbFactory.CreateDbContextAsync();
-            
+
             return await context.Feed
                 .AsNoTracking()
                 .Where(f => f.Id == feedId)
@@ -120,7 +104,7 @@ public class ArticleQueryService
         try
         {
             await using var context = await _dbFactory.CreateDbContextAsync();
-            
+
             return await context.Category
                 .AsNoTracking()
                 .Where(c => c.Id == categoryId)
@@ -132,6 +116,83 @@ public class ArticleQueryService
             _logger.LogError(ex, "Error getting category name for CategoryId: {CategoryId}", categoryId);
             return null;
         }
+    }
+
+    public async Task<int> MarkArticlesAsReadAsync(
+            int? feedId = null,
+            int? categoryId = null,
+            bool? isRead = null,
+            bool? isFavorite = null,
+            string? searchTerm = null)
+    {
+        try
+        {
+            await using var context = await _dbFactory.CreateDbContextAsync();
+
+            var query = context.Set<Article>().AsQueryable();
+
+            query = ApplyFilters(query, feedId, categoryId, isRead, isFavorite, searchTerm);
+
+            return await query
+                .Where(a => !a.IsRead)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, true));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error marking articles as read");
+            return 0;
+        }
+    }
+
+    private IQueryable<Article> ApplyFilters(
+        IQueryable<Article> query,
+        int? feedId,
+        int? categoryId,
+        bool? isRead,
+        bool? isFavorite,
+        string? searchTerm)
+    {
+        if (feedId.HasValue && feedId.Value > 0)
+        {
+            query = query.Where(a => a.FeedId == feedId.Value);
+        }
+        else if (categoryId.HasValue && categoryId.Value > 0)
+        {
+            query = query.Where(a => a.Feed!.CategoryId == categoryId.Value);
+        }
+
+        if (isRead.HasValue)
+        {
+            query = query.Where(a => a.IsRead == isRead.Value);
+        }
+
+        if (isFavorite.HasValue)
+        {
+            query = query.Where(a => a.IsFavorite == isFavorite.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var keywords = searchTerm.Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(k => !string.IsNullOrWhiteSpace(k))
+                .ToList();
+
+            if (keywords.Any())
+            {
+                foreach (var keyword in keywords)
+                {
+                    var k = keyword;
+                    query = query.Where(a =>
+                        a.Title.Contains(k) ||
+                        (a.Feed != null && a.Feed.Title.Contains(k)) ||
+                        (a.Content != null && a.Content.Contains(k)) ||
+                        (a.Author != null && a.Author.Contains(k)));
+                }
+            }
+        }
+
+        return query;
     }
 }
 

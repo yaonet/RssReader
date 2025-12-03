@@ -68,11 +68,18 @@
                 </span>
                 <input type="search" 
                        class="form-control border-start-0 ps-0" 
-                       @bind="_titleFilter" 
-                       @bind:event="oninput" 
+                       value="@_titleFilter"
+                       @oninput="OnSearchInput"
                        placeholder="Search articles..." 
-                       aria-label="Search articles by title or feed name" />
+                       aria-label="Search articles by title, feed name, content or author. Use spaces for multiple keywords" 
+                       title="Search by title, feed, content or author. Use spaces to search with multiple keywords - all keywords must match." />
             </div>
+            @if (!string.IsNullOrWhiteSpace(_titleFilter))
+            {
+                <small class="text-muted d-block mt-1">
+                    <i class="bi bi-funnel me-1"></i>Searching for: <strong>@_titleFilter</strong>
+                </small>
+            }
         </div>
         
         <div class="col-12 col-md-8 col-lg-9">
@@ -183,7 +190,7 @@ else if (!_articles.Any())
 else
 {
     <div class="table-responsive">
-        <QuickGrid Class="table article-grid" Items="FilteredArticles">
+        <QuickGrid Class="table article-grid" Items="_articles.AsQueryable()">
             <TemplateColumn Title="Feed" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.FeedTitle ?? string.Empty))">
                 <div class="@(context.IsRead ? "" : "article-row-unread")">
                     @if (!string.IsNullOrEmpty(context.FeedTitle))
@@ -308,6 +315,7 @@ else
     private ReadFilter _readFilter = ReadFilter.All;
     private FavoriteFilter _favoriteFilter = FavoriteFilter.All;
     private FeedUpdateProgress? _updateProgress = null;
+    private System.Timers.Timer? _debounceTimer;
 
     [SupplyParameterFromQuery(Name = "categoryId")]
     public int? CategoryId { get; set; }
@@ -315,22 +323,7 @@ else
     [SupplyParameterFromQuery(Name = "feedId")]
     public int? FeedId { get; set; }
 
-    private IQueryable<ArticleListItem> FilteredArticles
-    {
-        get
-        {
-            IEnumerable<ArticleListItem> query = _articles;
-            
-            if (!string.IsNullOrWhiteSpace(_titleFilter))
-            {
-                query = query.Where(a => 
-                    (a.Title != null && a.Title.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)) ||
-                    (a.FeedTitle != null && a.FeedTitle.Contains(_titleFilter, StringComparison.OrdinalIgnoreCase)));
-            }
-            
-            return query.AsQueryable();
-        }
-    }
+
 
     protected override async Task OnInitializedAsync()
     {
@@ -338,6 +331,17 @@ else
         NotificationService.OnCategoriesUpdated += HandleCategoriesUpdated;
         NotificationService.OnFeedUpdateProgress += HandleFeedUpdateProgress;
         
+        _debounceTimer = new System.Timers.Timer(500);
+        _debounceTimer.AutoReset = false;
+        _debounceTimer.Elapsed += async (sender, e) => 
+        {
+            await InvokeAsync(async () => 
+            {
+                await LoadArticlesAsync();
+                StateHasChanged();
+            });
+        };
+
         await LoadArticlesAsync();
     }
 
@@ -425,6 +429,7 @@ else
                 categoryId: CategoryId,
                 isRead: isReadFilter,
                 isFavorite: isFavoriteFilter,
+                searchTerm: _titleFilter,
                 take: InitialLoadSize);
 
             if (result.Success)
@@ -481,6 +486,7 @@ else
                 categoryId: CategoryId,
                 isRead: isReadFilter,
                 isFavorite: isFavoriteFilter,
+                searchTerm: _titleFilter,
                 skip: _articles.Count,
                 take: LoadMoreSize);
 
@@ -581,11 +587,11 @@ else
                 _selectedArticle.IsRead = newStatus;
             }
             
-            // Re-sort articles: unread first, then by publish date
-            _articles = _articles
-                .OrderBy(a => a.IsRead)
-                .ThenByDescending(a => a.PublishDate)
-                .ToList();
+            // No re-sorting to prevent jumping
+            // _articles = _articles
+            //     .OrderBy(a => a.IsRead)
+            //     .ThenByDescending(a => a.PublishDate)
+            //     .ToList();
             
             Logger.LogInformation("Toggled read status for article {ArticleId} to {IsRead}", articleItem.Id, newStatus);
         }
@@ -751,33 +757,56 @@ else
         {
             _isProcessing = true;
             
-            var articlesToMark = FilteredArticles.Where(a => !a.IsRead).Select(a => a.Id).ToList();
-            
-            if (!articlesToMark.Any())
+            bool? isReadFilter = _readFilter switch
             {
-                _alert = Alert.Info("All visible articles are already marked as read.");
+                ReadFilter.Read => true,
+                ReadFilter.Unread => false,
+                _ => null
+            };
+
+            bool? isFavoriteFilter = _favoriteFilter switch
+            {
+                FavoriteFilter.Favorite => true,
+                FavoriteFilter.NonFavorite => false,
+                _ => null
+            };
+
+            var count = await ArticleQuery.MarkArticlesAsReadAsync(
+                feedId: FeedId,
+                categoryId: CategoryId,
+                isRead: isReadFilter,
+                isFavorite: isFavoriteFilter,
+                searchTerm: _titleFilter);
+            
+            if (count == 0)
+            {
+                _alert = Alert.Info("No unread articles found matching current filters.");
                 return;
             }
             
-            await using var context = await DbFactory.CreateDbContextAsync();
-            
-            await context.Set<Article>()
-                .Where(a => articlesToMark.Contains(a.Id))
-                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, true));
-            
-            foreach (var article in _articles.Where(a => articlesToMark.Contains(a.Id)))
+            // Update local state for loaded articles
+            foreach (var article in _articles)
             {
                 article.IsRead = true;
             }
             
-            // Re-sort articles: unread first, then by publish date
-            _articles = _articles
-                .OrderBy(a => a.IsRead)
-                .ThenByDescending(a => a.PublishDate)
-                .ToList();
+            // If we are filtering by "Unread", clear the list as they are no longer unread
+            if (_readFilter == ReadFilter.Unread)
+            {
+                _articles.Clear();
+                _hasMoreArticles = false;
+            }
+            else
+            {
+                // Re-sort articles: unread first, then by publish date
+                _articles = _articles
+                    .OrderBy(a => a.IsRead)
+                    .ThenByDescending(a => a.PublishDate)
+                    .ToList();
+            }
             
-            _alert = Alert.Success($"Marked {articlesToMark.Count} article(s) as read.");
-            Logger.LogInformation("Marked {Count} articles as read", articlesToMark.Count);
+            _alert = Alert.Success($"Marked {count} article(s) as read.");
+            Logger.LogInformation("Marked {Count} articles as read", count);
         }
         catch (Exception ex)
         {
@@ -840,6 +869,14 @@ else
         NotificationService.OnFeedsUpdated -= HandleFeedsUpdated;
         NotificationService.OnCategoriesUpdated -= HandleCategoriesUpdated;
         NotificationService.OnFeedUpdateProgress -= HandleFeedUpdateProgress;
+        _debounceTimer?.Dispose();
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _titleFilter = e.Value?.ToString() ?? string.Empty;
+        _debounceTimer?.Stop();
+        _debounceTimer?.Start();
     }
 
     private string GetFeedFilterUrl(int feedId)
