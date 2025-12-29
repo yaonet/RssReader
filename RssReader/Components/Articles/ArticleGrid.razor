@@ -1,0 +1,84 @@
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using RssReader.ViewModels
+@using RssReader.Components.Shared
+
+<div class="table-responsive">
+    <QuickGrid Class="table article-grid" Items="Articles.AsQueryable()">
+        <TemplateColumn Title="Feed" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.FeedTitle ?? string.Empty))">
+            <div class="@(context.IsRead ? "" : "article-row-unread")">
+                @if (!string.IsNullOrEmpty(context.FeedTitle))
+                {
+                    <FeedIcon ImageUrl="@context.FeedImageUrl" Title="@context.FeedTitle" />
+                    <a href="@GetFeedFilterUrl(context.FeedId)" class="text-decoration-none">@context.FeedTitle</a>
+                }
+                else
+                {
+                    <span class="text-muted">Unknown Feed</span>
+                }
+            </div>
+        </TemplateColumn>
+        <TemplateColumn Title="Title" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.Title))">
+            <div class="@(context.IsRead ? "" : "article-row-unread")">
+                <button class="btn btn-link text-start p-0 text-decoration-none" 
+                        @onclick="() => OnArticleSelected.InvokeAsync(context)"
+                        style="color: inherit;"
+                        aria-label="@($"Read article: {context.Title}")">
+                    @context.Title
+                </button>
+            </div>
+        </TemplateColumn>
+        <TemplateColumn Title="">
+            <div class="@(context.IsRead ? "" : "article-row-unread")">
+                <button class="btn btn-sm btn-link p-0 border-0" 
+                        @onclick="() => OnToggleRead.InvokeAsync(context)"
+                        title="@(context.IsRead ? "Mark as unread" : "Mark as read")"
+                        aria-label="@(context.IsRead ? "Mark as unread" : "Mark as read")">
+                    <i class="bi @(context.IsRead ? "bi-envelope-open icon-read" : "bi-envelope icon-unread")"></i>
+                </button>
+            </div>
+        </TemplateColumn>
+        <TemplateColumn Title="">
+            <div class="@(context.IsRead ? "" : "article-row-unread")">
+                <button class="btn btn-sm btn-link p-0 border-0" 
+                        @onclick="() => OnToggleFavorite.InvokeAsync(context)"
+                        title="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")"
+                        aria-label="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")">
+                    <i class="bi @(context.IsFavorite ? "bi-star-fill icon-favorite-filled" : "bi-star icon-favorite")"></i>
+                </button>
+            </div>
+        </TemplateColumn>
+        <TemplateColumn Title="">
+            <div class="@(context.IsRead ? "" : "article-row-unread")">
+                <a href="@context.Link" 
+                   target="_blank" 
+                   rel="noopener noreferrer" 
+                   class="btn btn-sm btn-link" 
+                   title="Read on source website"
+                   aria-label="@($"Read {context.Title} on source website")">
+                    <i class="bi bi-box-arrow-up-right icon-external-link"></i>
+                </a>
+            </div>
+        </TemplateColumn>
+        <TemplateColumn Title="PublishDate" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.PublishDate))" Class="d-none d-md-table-cell">
+            <div class="@(context.IsRead ? "" : "article-row-unread")">
+                @context.PublishDate.ToString("yyyy-MM-dd HH:mm")
+            </div>
+        </TemplateColumn>
+    </QuickGrid>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public List<ArticleListItem> Articles { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<ArticleListItem> OnArticleSelected { get; set; }
+
+    [Parameter]
+    public EventCallback<ArticleListItem> OnToggleRead { get; set; }
+
+    [Parameter]
+    public EventCallback<ArticleListItem> OnToggleFavorite { get; set; }
+
+    private static string GetFeedFilterUrl(int feedId) => $"/articles?feedId={feedId}";
+}

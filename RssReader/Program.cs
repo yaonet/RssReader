@@ -54,6 +54,7 @@ try
     builder.Services.AddScoped<Settings>();
     builder.Services.AddScoped<FeedManager>();
     builder.Services.AddScoped<ArticleQueryService>();
+    builder.Services.AddSingleton<ThemeService>();
 
     // Add background service for scheduled feed updates
     builder.Services.AddHostedService<FeedUpdater>();

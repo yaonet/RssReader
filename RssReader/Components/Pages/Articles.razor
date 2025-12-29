@@ -1,8 +1,8 @@
 @page "/"
 @page "/articles"
 @rendermode InteractiveServer
+@using System.Linq.Expressions
 @using Microsoft.EntityFrameworkCore
-@using Microsoft.AspNetCore.Components.QuickGrid
 @using RssReader.Models
 @using RssReader.ViewModels
 @using RssReader.Data
@@ -10,7 +10,7 @@
 @using RssReader.Components.Shared
 @using RssReader.Components.Articles
 @implements IDisposable
-@inject IDbContextFactory<RssReader.Data.RssReaderContext> DbFactory
+@inject IDbContextFactory<RssReaderContext> DbFactory
 @inject UpdateNotifier NotificationService
 @inject ILogger<Articles> Logger
 @inject FeedManager FeedService
@@ -20,158 +20,19 @@
 
 <AlertDisplay @bind-Alert="_alert" />
 
-@if (_updateProgress != null && _isProcessing)
-{
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0">
-                    <i class="bi bi-arrow-clockwise"></i> Updating Feeds
-                </h6>
-                <span class="badge bg-primary">@_updateProgress.Percentage%</span>
-            </div>
-            <div class="progress mb-2" style="height: 25px;">
-                <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                     role="progressbar" 
-                     style="width: @(_updateProgress.Percentage)%"
-                     aria-valuenow="@_updateProgress.Percentage" 
-                     aria-valuemin="0" 
-                     aria-valuemax="100">
-                    @_updateProgress.ProcessedFeeds / @_updateProgress.TotalFeeds
-                </div>
-            </div>
-            <div class="d-flex justify-content-between text-muted small">
-                <span>
-                    @if (!string.IsNullOrEmpty(_updateProgress.CurrentFeedTitle))
-                    {
-                        <span>Current: @_updateProgress.CurrentFeedTitle</span>
-                    }
-                </span>
-                <span>
-                    <span class="text-success me-2">? @_updateProgress.SuccessfulFeeds</span>
-                    @if (_updateProgress.FailedFeeds > 0)
-                    {
-                        <span class="text-danger">? @_updateProgress.FailedFeeds</span>
-                    }
-                </span>
-            </div>
-        </div>
-    </div>
-}
+<FeedUpdateProgressBar Progress="_updateProgress" IsVisible="_isProcessing" />
 
-<div class="mb-4">
-    <div class="row g-3">
-        <div class="col-12 col-md-4 col-lg-3">
-            <div class="input-group">
-                <span class="input-group-text bg-light border-end-0">
-                    <i class="bi bi-search"></i>
-                </span>
-                <input type="search" 
-                       class="form-control border-start-0 ps-0" 
-                       value="@_titleFilter"
-                       @oninput="OnSearchInput"
-                       placeholder="Search articles..." 
-                       aria-label="Search articles by title, feed name, content or author. Use spaces for multiple keywords" 
-                       title="Search by title, feed, content or author. Use spaces to search with multiple keywords - all keywords must match." />
-            </div>
-            @if (!string.IsNullOrWhiteSpace(_titleFilter))
-            {
-                <small class="text-muted d-block mt-1">
-                    <i class="bi bi-funnel me-1"></i>Searching for: <strong>@_titleFilter</strong>
-                </small>
-            }
-        </div>
-        
-        <div class="col-12 col-md-8 col-lg-9">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-                <div class="btn-group shadow-sm" role="group" aria-label="Filter articles">
-                    <button type="button" 
-                            class="btn btn-sm @(_readFilter == ReadFilter.Unread ? "btn-primary" : "btn-outline-secondary")"
-                            @onclick="async () => await SetReadFilter(ReadFilter.Unread)"
-                            title="Show unread articles">
-                        <i class="bi bi-envelope me-1"></i>
-                        <span class="d-none d-md-inline">Unread</span>
-                    </button>
-                    <button type="button" 
-                            class="btn btn-sm @(_readFilter == ReadFilter.Read ? "btn-primary" : "btn-outline-secondary")"
-                            @onclick="async () => await SetReadFilter(ReadFilter.Read)"
-                            title="Show read articles">
-                        <i class="bi bi-envelope-open me-1"></i>
-                        <span class="d-none d-md-inline">Read</span>
-                    </button>
-                    <button type="button" 
-                            class="btn btn-sm @(_favoriteFilter == FavoriteFilter.Favorite ? "btn-primary" : "btn-outline-secondary")"
-                            @onclick="async () => await SetFavoriteFilter(FavoriteFilter.Favorite)"
-                            title="Show favorite articles">
-                        <i class="bi bi-star-fill me-1"></i>
-                        <span class="d-none d-md-inline">Favorites</span>
-                    </button>
-                    <button type="button" 
-                            class="btn btn-sm @(_favoriteFilter == FavoriteFilter.NonFavorite ? "btn-primary" : "btn-outline-secondary")"
-                            @onclick="async () => await SetFavoriteFilter(FavoriteFilter.NonFavorite)"
-                            title="Show non-favorite articles">
-                        <i class="bi bi-star me-1"></i>
-                        <span class="d-none d-md-inline">Non-Favorites</span>
-                    </button>
-                </div>
-                
-                @if (_readFilter != ReadFilter.All || _favoriteFilter != FavoriteFilter.All)
-                {
-                    <button type="button" 
-                            class="btn btn-sm btn-outline-danger"
-                            @onclick="ClearFilters"
-                            title="Clear all filters">
-                        <i class="bi bi-x-circle me-1"></i>
-                        <span class="d-none d-md-inline">Clear</span>
-                    </button>
-                }
-                
-                <div class="ms-auto d-flex gap-2">
-                    <button type="button" 
-                            class="btn btn-sm btn-outline-primary shadow-sm"
-                            @onclick="MarkAllAsRead"
-                            disabled="@_isProcessing"
-                            title="Mark all visible articles as read">
-                        <i class="bi bi-check-all me-1"></i>
-                        <span class="d-none d-lg-inline">Mark All Read</span>
-                    </button>
-                    <button type="button" 
-                            class="btn btn-sm btn-success shadow-sm"
-                            @onclick="UpdateAllFeeds"
-                            disabled="@_isProcessing"
-                            title="Update all feeds">
-                        @if (_isProcessing)
-                        {
-                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-                        }
-                        else
-                        {
-                            <i class="bi bi-arrow-clockwise me-1"></i>
-                        }
-                        <span class="d-none d-lg-inline">Update Feeds</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    @if (!string.IsNullOrEmpty(_filterInfo))
-    {
-        <div class="row mt-3">
-            <div class="col-12">
-                <div class="alert alert-info d-flex align-items-center justify-content-between py-2 mb-0" role="alert">
-                    <span>
-                        <i class="bi bi-funnel-fill me-2"></i>
-                        <strong>Active Filter:</strong> @_filterInfo
-                    </span>
-                    <a href="/articles" class="btn btn-sm btn-outline-info">
-                        <i class="bi bi-x-lg me-1"></i>Clear
-                    </a>
-                </div>
-            </div>
-        </div>
-    }
-</div>
+<ArticleFilterBar SearchTerm="@_searchTerm"
+                  ReadFilter="_readFilter"
+                  FavoriteFilter="_favoriteFilter"
+                  FilterInfo="@_filterInfo"
+                  IsProcessing="_isProcessing"
+                  OnSearchTermChanged="HandleSearchTermChanged"
+                  OnReadFilterChanged="HandleReadFilterChanged"
+                  OnFavoriteFilterChanged="HandleFavoriteFilterChanged"
+                  OnClearFilters="ClearFilters"
+                  OnMarkAllAsRead="MarkAllAsRead"
+                  OnUpdateFeeds="UpdateAllFeeds" />
 
 @if (_isLoadingArticles)
 {
@@ -181,7 +42,7 @@
         </div>
     </div>
 }
-else if (!_articles.Any())
+else if (_articles.Count == 0)
 {
     <div class="alert alert-info" role="alert">
         <i class="bi bi-info-circle me-2"></i>No articles yet. Add some feeds to see articles here.
@@ -189,102 +50,17 @@ else if (!_articles.Any())
 }
 else
 {
-    <div class="table-responsive">
-        <QuickGrid Class="table article-grid" Items="_articles.AsQueryable()">
-            <TemplateColumn Title="Feed" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.FeedTitle ?? string.Empty))">
-                <div class="@(context.IsRead ? "" : "article-row-unread")">
-                    @if (!string.IsNullOrEmpty(context.FeedTitle))
-                    {
-                        <FeedIcon ImageUrl="@context.FeedImageUrl" Title="@context.FeedTitle" />
-                        <a href="@GetFeedFilterUrl(context.FeedId)" class="text-decoration-none">@context.FeedTitle</a>
-                    }
-                    else
-                    {
-                        <span class="text-muted">Unknown Feed</span>
-                    }
-                </div>
-            </TemplateColumn>
-            <TemplateColumn Title="Title" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.Title))">
-                <div class="@(context.IsRead ? "" : "article-row-unread")">
-                    <button class="btn btn-link text-start p-0 text-decoration-none" 
-                            @onclick="() => ShowArticleContent(context)"
-                            style="color: inherit;"
-                            aria-label="@($"Read article: {context.Title}")">
-                        @context.Title
-                    </button>
-                </div>
-            </TemplateColumn>
-            <TemplateColumn Title="">
-                <div class="@(context.IsRead ? "" : "article-row-unread")">
-                    <button class="btn btn-sm btn-link p-0 border-0" 
-                            @onclick="() => ToggleReadStatus(context)"
-                            title="@(context.IsRead ? "Mark as unread" : "Mark as read")"
-                            aria-label="@(context.IsRead ? "Mark as unread" : "Mark as read")">
-                        <i class="bi @(context.IsRead ? "bi-envelope-open icon-read" : "bi-envelope icon-unread")"></i>
-                    </button>
-                </div>
-            </TemplateColumn>
-            <TemplateColumn Title="">
-                <div class="@(context.IsRead ? "" : "article-row-unread")">
-                    <button class="btn btn-sm btn-link p-0 border-0" 
-                            @onclick="() => ToggleFavoriteStatus(context)"
-                            title="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")"
-                            aria-label="@(context.IsFavorite ? "Remove from favorites" : "Add to favorites")">
-                        <i class="bi @(context.IsFavorite ? "bi-star-fill icon-favorite-filled" : "bi-star icon-favorite")"></i>
-                    </button>
-                </div>
-            </TemplateColumn>
-            <TemplateColumn Title="">
-                <div class="@(context.IsRead ? "" : "article-row-unread")">
-                    <a href="@context.Link" 
-                       target="_blank" 
-                       rel="noopener noreferrer" 
-                       class="btn btn-sm btn-link" 
-                       title="Read on source website"
-                       aria-label="@($"Read {context.Title} on source website")">
-                        <i class="bi bi-box-arrow-up-right icon-external-link"></i>
-                    </a>
-                </div>
-            </TemplateColumn>
-            <TemplateColumn Title="PublishDate" SortBy="@(GridSort<ArticleListItem>.ByAscending(a => a.PublishDate))" Class="d-none d-md-table-cell">
-                <div class="@(context.IsRead ? "" : "article-row-unread")">
-                    @context.PublishDate.ToString("yyyy-MM-dd HH:mm")
-                </div>
-            </TemplateColumn>
-        </QuickGrid>
-    </div>
-    
-    @if (_hasMoreArticles && !_isLoadingMore)
-    {
-        <div class="text-center my-4">
-            <button type="button" 
-                    class="btn btn-outline-primary"
-                    @onclick="async () => await LoadMoreArticlesAsync()"
-                    disabled="@_isProcessing">
-                <i class="bi bi-arrow-down-circle me-2"></i>Load More Articles
-            </button>
-            <div class="text-muted small mt-2">
-                Currently showing @_articles.Count articles
-            </div>
-        </div>
-    }
-    else if (_isLoadingMore)
-    {
-        <div class="text-center my-4">
-            <div class="spinner-border spinner-border-sm" role="status">
-                <span class="visually-hidden">Loading more articles...</span>
-            </div>
-            <div class="text-muted small mt-2">Loading more articles...</div>
-        </div>
-    }
-    else if (!_hasMoreArticles && _articles.Count >= InitialLoadSize)
-    {
-        <div class="text-center my-4">
-            <div class="text-muted small">
-                <i class="bi bi-check-circle me-1"></i>All articles loaded (@_articles.Count total)
-            </div>
-        </div>
-    }
+    <ArticleGrid Articles="_articles"
+                 OnArticleSelected="ShowArticleContent"
+                 OnToggleRead="ToggleReadStatus"
+                 OnToggleFavorite="ToggleFavoriteStatus" />
+
+    <LoadMoreButton HasMore="_hasMoreArticles"
+                    IsLoadingMore="_isLoadingMore"
+                    IsDisabled="_isProcessing"
+                    CurrentCount="_articles.Count"
+                    MinCountToShowTotal="InitialLoadSize"
+                    OnLoadMore="LoadMoreArticlesAsync" />
 }
 
 <ArticleViewer Article="_selectedArticle"
@@ -296,26 +72,26 @@ else
 @code {
     private const int InitialLoadSize = 100;
     private const int LoadMoreSize = 50;
-    
-    private enum ReadFilter { All, Read, Unread }
-    private enum FavoriteFilter { All, Favorite, NonFavorite }
-    
-    private List<ArticleListItem> _articles = new();
-    private string _titleFilter = string.Empty;
+    private const string FeedNotFoundMessage = "Feed not found";
+    private const string CategoryNotFoundMessage = "Category not found";
+
+    private List<ArticleListItem> _articles = [];
+    private string _searchTerm = string.Empty;
     private string _filterInfo = string.Empty;
     private int _currentCategoryId = -1;
     private int _currentFeedId = -1;
-    private Article? _selectedArticle = null;
+    private Article? _selectedArticle;
     private Alert? _alert;
     private bool _isLoadingArticles = true;
-    private bool _isLoadingMore = false;
+    private bool _isLoadingMore;
     private bool _hasMoreArticles = true;
-    private bool _disposed = false;
-    private bool _isProcessing = false;
+    private bool _disposed;
+    private bool _isProcessing;
     private ReadFilter _readFilter = ReadFilter.All;
     private FavoriteFilter _favoriteFilter = FavoriteFilter.All;
-    private FeedUpdateProgress? _updateProgress = null;
+    private FeedUpdateProgress? _updateProgress;
     private System.Timers.Timer? _debounceTimer;
+    private CancellationTokenSource? _cts;
 
     [SupplyParameterFromQuery(Name = "categoryId")]
     public int? CategoryId { get; set; }
@@ -323,23 +99,32 @@ else
     [SupplyParameterFromQuery(Name = "feedId")]
     public int? FeedId { get; set; }
 
-
-
     protected override async Task OnInitializedAsync()
     {
         NotificationService.OnFeedsUpdated += HandleFeedsUpdated;
         NotificationService.OnCategoriesUpdated += HandleCategoriesUpdated;
         NotificationService.OnFeedUpdateProgress += HandleFeedUpdateProgress;
-        
-        _debounceTimer = new System.Timers.Timer(500);
-        _debounceTimer.AutoReset = false;
-        _debounceTimer.Elapsed += async (sender, e) => 
+
+        _cts = new CancellationTokenSource();
+        _debounceTimer = new System.Timers.Timer(500) { AutoReset = false };
+        _debounceTimer.Elapsed += async (_, _) =>
         {
-            await InvokeAsync(async () => 
+            if (_disposed) return;
+
+            try
             {
-                await LoadArticlesAsync();
-                StateHasChanged();
-            });
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    await LoadArticlesAsync();
+                    StateHasChanged();
+                });
+            }
+            catch (ObjectDisposedException) { }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error in debounce timer elapsed handler");
+            }
         };
 
         await LoadArticlesAsync();
@@ -349,12 +134,12 @@ else
     {
         var newCategoryId = CategoryId ?? 0;
         var newFeedId = FeedId ?? 0;
-        
+
         if (_currentCategoryId != newCategoryId || _currentFeedId != newFeedId)
         {
             _currentCategoryId = newCategoryId;
             _currentFeedId = newFeedId;
-            _titleFilter = string.Empty;
+            _searchTerm = string.Empty;
             _alert = null;
             await LoadArticlesAsync();
         }
@@ -366,70 +151,21 @@ else
         {
             _isLoadingArticles = true;
             _hasMoreArticles = true;
-            
-            if (FeedId.HasValue && FeedId.Value > 0)
-            {
-                var feedInfo = await ArticleQuery.GetFeedFilterInfoAsync(FeedId.Value);
-                
-                if (feedInfo != null)
-                {
-                    _filterInfo = $"Feed: {feedInfo.FeedTitle}";
-                    if (feedInfo.CategoryName != null)
-                    {
-                        _filterInfo += $" (Category: {feedInfo.CategoryName})";
-                    }
-                }
-                else
-                {
-                    _filterInfo = "Feed not found";
-                    Logger.LogWarning("Feed with ID {FeedId} not found", FeedId.Value);
-                    _articles = new List<ArticleListItem>();
-                    _hasMoreArticles = false;
-                    return;
-                }
-            }
-            else if (CategoryId.HasValue && CategoryId.Value > 0)
-            {
-                var categoryName = await ArticleQuery.GetCategoryNameAsync(CategoryId.Value);
-                    
-                if (categoryName != null)
-                {
-                    _filterInfo = $"Category: {categoryName}";
-                }
-                else
-                {
-                    _filterInfo = "Category not found";
-                    Logger.LogWarning("Category with ID {CategoryId} not found", CategoryId.Value);
-                    _articles = new List<ArticleListItem>();
-                    _hasMoreArticles = false;
-                    return;
-                }
-            }
-            else
-            {
-                _filterInfo = string.Empty;
-            }
 
-            bool? isReadFilter = _readFilter switch
+            _filterInfo = await BuildFilterInfoAsync();
+            if (_filterInfo == FeedNotFoundMessage || _filterInfo == CategoryNotFoundMessage)
             {
-                ReadFilter.Read => true,
-                ReadFilter.Unread => false,
-                _ => null
-            };
-
-            bool? isFavoriteFilter = _favoriteFilter switch
-            {
-                FavoriteFilter.Favorite => true,
-                FavoriteFilter.NonFavorite => false,
-                _ => null
-            };
+                _articles = [];
+                _hasMoreArticles = false;
+                return;
+            }
 
             var result = await ArticleQuery.GetArticlesAsync(
                 feedId: FeedId,
                 categoryId: CategoryId,
-                isRead: isReadFilter,
-                isFavorite: isFavoriteFilter,
-                searchTerm: _titleFilter,
+                isRead: GetReadFilterValue(),
+                isFavorite: GetFavoriteFilterValue(),
+                searchTerm: _searchTerm,
                 take: InitialLoadSize);
 
             if (result.Success)
@@ -442,7 +178,7 @@ else
             {
                 Logger.LogError("Failed to load articles: {Error}", result.ErrorMessage);
                 _alert = Alert.Error($"Failed to load articles: {result.ErrorMessage}");
-                _articles = new List<ArticleListItem>();
+                _articles = [];
                 _hasMoreArticles = false;
             }
         }
@@ -450,7 +186,7 @@ else
         {
             Logger.LogError(ex, "Error loading articles. CategoryId: {CategoryId}, FeedId: {FeedId}", CategoryId, FeedId);
             _alert = Alert.Error($"Failed to load articles: {ex.Message}");
-            _articles = new List<ArticleListItem>();
+            _articles = [];
             _hasMoreArticles = false;
         }
         finally
@@ -459,44 +195,77 @@ else
         }
     }
 
+    private async Task<string> BuildFilterInfoAsync()
+    {
+        if (FeedId is > 0)
+        {
+            var feedInfo = await ArticleQuery.GetFeedFilterInfoAsync(FeedId.Value);
+            if (feedInfo == null)
+            {
+                Logger.LogWarning("Feed with ID {FeedId} not found", FeedId.Value);
+                return FeedNotFoundMessage;
+            }
+
+            var info = $"Feed: {feedInfo.FeedTitle}";
+            if (feedInfo.CategoryName != null)
+            {
+                info += $" (Category: {feedInfo.CategoryName})";
+            }
+            return info;
+        }
+
+        if (CategoryId is > 0)
+        {
+            var categoryName = await ArticleQuery.GetCategoryNameAsync(CategoryId.Value);
+            if (categoryName == null)
+            {
+                Logger.LogWarning("Category with ID {CategoryId} not found", CategoryId.Value);
+                return CategoryNotFoundMessage;
+            }
+            return $"Category: {categoryName}";
+        }
+
+        return string.Empty;
+    }
+
+    private bool? GetReadFilterValue() => _readFilter switch
+    {
+        ReadFilter.Read => true,
+        ReadFilter.Unread => false,
+        _ => null
+    };
+
+    private bool? GetFavoriteFilterValue() => _favoriteFilter switch
+    {
+        FavoriteFilter.Favorite => true,
+        FavoriteFilter.NonFavorite => false,
+        _ => null
+    };
+
     private async Task LoadMoreArticlesAsync()
     {
         if (_isLoadingMore || _isProcessing || !_hasMoreArticles) return;
-        
+
         try
         {
             _isLoadingMore = true;
-            
-            bool? isReadFilter = _readFilter switch
-            {
-                ReadFilter.Read => true,
-                ReadFilter.Unread => false,
-                _ => null
-            };
-
-            bool? isFavoriteFilter = _favoriteFilter switch
-            {
-                FavoriteFilter.Favorite => true,
-                FavoriteFilter.NonFavorite => false,
-                _ => null
-            };
 
             var result = await ArticleQuery.GetArticlesAsync(
                 feedId: FeedId,
                 categoryId: CategoryId,
-                isRead: isReadFilter,
-                isFavorite: isFavoriteFilter,
-                searchTerm: _titleFilter,
+                isRead: GetReadFilterValue(),
+                isFavorite: GetFavoriteFilterValue(),
+                searchTerm: _searchTerm,
                 skip: _articles.Count,
                 take: LoadMoreSize);
 
             if (result.Success)
             {
-                if (result.Articles.Any())
+                if (result.Articles.Count != 0)
                 {
                     _articles.AddRange(result.Articles);
                     _hasMoreArticles = result.Articles.Count >= LoadMoreSize;
-                    Logger.LogInformation("Loaded {Count} more articles, total now {Total}", 
+                    Logger.LogInformation("Loaded {Count} more articles, total now {Total}",
                         result.Articles.Count, _articles.Count);
                 }
                 else
@@ -525,114 +294,96 @@ else
     private async Task ShowArticleContent(ArticleListItem articleItem)
     {
         await using var context = await DbFactory.CreateDbContextAsync();
-        
+
         _selectedArticle = await context.Set<Article>()
             .Include(a => a.Feed)
             .ThenInclude(f => f!.Category)
-            .FirstOrDefaultAsync(a => a.Id == articleItem.Id);
-        
-        if (_selectedArticle != null && !_selectedArticle.IsRead)
+            .FirstOrDefaultAsync(a => a.Id == articleItem.Id, _cts?.Token ?? default);
+
+        if (_selectedArticle is { IsRead: false })
         {
             await MarkArticleAsRead(articleItem);
         }
     }
 
-    private void CloseArticleContent()
-    {
-        _selectedArticle = null;
-    }
+    private void CloseArticleContent() => _selectedArticle = null;
 
     private async Task MarkArticleAsRead(ArticleListItem articleItem)
     {
-        try
-        {
-            await using var context = await DbFactory.CreateDbContextAsync();
-            
-            await context.Set<Article>()
-                .Where(a => a.Id == articleItem.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, true));
-            
-            articleItem.IsRead = true;
-            
-            if (_selectedArticle != null)
-            {
-                _selectedArticle.IsRead = true;
-            }
-            
-            Logger.LogInformation("Marked article as read: {ArticleId}", articleItem.Id);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to mark article as read: {ArticleId}", articleItem.Id);
-            _alert = Alert.Error($"Failed to mark article as read: {ex.Message}");
-        }
+        await UpdateArticleBoolPropertyAsync(
+            articleItem,
+            a => a.IsRead,
+            true,
+            item => item.IsRead = true,
+            "read");
     }
 
     private async Task ToggleReadStatus(ArticleListItem articleItem)
     {
-        try
-        {
-            var newStatus = !articleItem.IsRead;
-            
-            await using var context = await DbFactory.CreateDbContextAsync();
-            
-            await context.Set<Article>()
-                .Where(a => a.Id == articleItem.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsRead, newStatus));
-            
-            articleItem.IsRead = newStatus;
-            
-            if (_selectedArticle != null && _selectedArticle.Id == articleItem.Id)
-            {
-                _selectedArticle.IsRead = newStatus;
-            }
-            
-            // No re-sorting to prevent jumping
-            // _articles = _articles
-            //     .OrderBy(a => a.IsRead)
-            //     .ThenByDescending(a => a.PublishDate)
-            //     .ToList();
-            
-            Logger.LogInformation("Toggled read status for article {ArticleId} to {IsRead}", articleItem.Id, newStatus);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to update read status for article: {ArticleId}", articleItem.Id);
-            _alert = Alert.Error($"Failed to update read status: {ex.Message}");
-        }
+        var newStatus = !articleItem.IsRead;
+        await UpdateArticleBoolPropertyAsync(
+            articleItem,
+            a => a.IsRead,
+            newStatus,
+            item => item.IsRead = newStatus,
+            "read");
     }
 
     private async Task ToggleFavoriteStatus(ArticleListItem articleItem)
     {
+        var newStatus = !articleItem.IsFavorite;
+        await UpdateArticleBoolPropertyAsync(
+            articleItem,
+            a => a.IsFavorite,
+            newStatus,
+            item => item.IsFavorite = newStatus,
+            "favorite");
+    }
+
+    private async Task UpdateArticleBoolPropertyAsync(
+        ArticleListItem articleItem,
+        Expression<Func<Article, bool>> propertySelector,
+        bool newValue,
+        Action<ArticleListItem> updateListItem,
+        string propertyName)
+    {
         try
         {
-            var newStatus = !articleItem.IsFavorite;
-            
             await using var context = await DbFactory.CreateDbContextAsync();
-            
+
             await context.Set<Article>()
                 .Where(a => a.Id == articleItem.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsFavorite, newStatus));
-            
-            articleItem.IsFavorite = newStatus;
-            
-            if (_selectedArticle != null && _selectedArticle.Id == articleItem.Id)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(propertySelector, newValue),
+                    _cts?.Token ?? default);
+
+            updateListItem(articleItem);
+
+            if (_selectedArticle?.Id == articleItem.Id)
             {
-                _selectedArticle.IsFavorite = newStatus;
+                var propertyInfo = ((MemberExpression)propertySelector.Body).Member;
+                typeof(Article).GetProperty(propertyInfo.Name)?.SetValue(_selectedArticle, newValue);
             }
-            
-            Logger.LogInformation("Toggled favorite status for article {ArticleId} to {IsFavorite}", articleItem.Id, newStatus);
+
+            Logger.LogInformation("Updated {PropertyName} status for article {ArticleId} to {Value}",
+                propertyName, articleItem.Id, newValue);
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogDebug("Update {PropertyName} operation was cancelled for article {ArticleId}",
+                propertyName, articleItem.Id);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to update favorite status for article: {ArticleId}", articleItem.Id);
-            _alert = Alert.Error($"Failed to update favorite status: {ex.Message}");
+            Logger.LogError(ex, "Failed to update {PropertyName} status for article: {ArticleId}",
+                propertyName, articleItem.Id);
+            _alert = Alert.Error($"Failed to update {propertyName} status: {ex.Message}");
         }
     }
 
     private async Task HandleToggleReadFromViewer(Article article)
     {
-        var articleItem = _articles.FirstOrDefault(a => a.Id == article.Id);
+        var articleItem = _articles.Find(a => a.Id == article.Id);
         if (articleItem != null)
         {
             await ToggleReadStatus(articleItem);
@@ -641,7 +392,7 @@ else
 
     private async Task HandleToggleFavoriteFromViewer(Article article)
     {
-        var articleItem = _articles.FirstOrDefault(a => a.Id == article.Id);
+        var articleItem = _articles.Find(a => a.Id == article.Id);
         if (articleItem != null)
         {
             await ToggleFavoriteStatus(articleItem);
@@ -660,10 +411,7 @@ else
                 StateHasChanged();
             });
         }
-        catch (ObjectDisposedException)
-        {
-            // Component disposed
-        }
+        catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error handling feeds updated event");
@@ -682,10 +430,7 @@ else
                 StateHasChanged();
             });
         }
-        catch (ObjectDisposedException)
-        {
-            // Component disposed
-        }
+        catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error handling categories updated event");
@@ -704,93 +449,67 @@ else
                 StateHasChanged();
             });
         }
-        catch (ObjectDisposedException)
-        {
-            // Component disposed
-        }
+        catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error handling feed update progress event");
         }
     }
 
-    private async Task SetReadFilter(ReadFilter filter)
+    private void HandleSearchTermChanged(string value)
     {
-        if (_readFilter == filter)
-        {
-            _readFilter = ReadFilter.All;
-        }
-        else
-        {
-            _readFilter = filter;
-        }
+        _searchTerm = value;
+        _debounceTimer?.Stop();
+        _debounceTimer?.Start();
+    }
+
+    private async Task HandleReadFilterChanged(ReadFilter filter)
+    {
+        _readFilter = _readFilter == filter ? ReadFilter.All : filter;
         await LoadArticlesAsync();
     }
-    
-    private async Task SetFavoriteFilter(FavoriteFilter filter)
+
+    private async Task HandleFavoriteFilterChanged(FavoriteFilter filter)
     {
-        if (_favoriteFilter == filter)
-        {
-            _favoriteFilter = FavoriteFilter.All;
-        }
-        else
-        {
-            _favoriteFilter = filter;
-        }
+        _favoriteFilter = _favoriteFilter == filter ? FavoriteFilter.All : filter;
         await LoadArticlesAsync();
     }
-    
+
     private async Task ClearFilters()
     {
-        _titleFilter = string.Empty;
+        _searchTerm = string.Empty;
         _readFilter = ReadFilter.All;
         _favoriteFilter = FavoriteFilter.All;
         _alert = null;
         await LoadArticlesAsync();
     }
-    
+
     private async Task MarkAllAsRead()
     {
         if (_isProcessing) return;
-        
+
         try
         {
             _isProcessing = true;
-            
-            bool? isReadFilter = _readFilter switch
-            {
-                ReadFilter.Read => true,
-                ReadFilter.Unread => false,
-                _ => null
-            };
-
-            bool? isFavoriteFilter = _favoriteFilter switch
-            {
-                FavoriteFilter.Favorite => true,
-                FavoriteFilter.NonFavorite => false,
-                _ => null
-            };
 
             var count = await ArticleQuery.MarkArticlesAsReadAsync(
                 feedId: FeedId,
                 categoryId: CategoryId,
-                isRead: isReadFilter,
-                isFavorite: isFavoriteFilter,
-                searchTerm: _titleFilter);
-            
+                isRead: GetReadFilterValue(),
+                isFavorite: GetFavoriteFilterValue(),
+                searchTerm: _searchTerm);
+
             if (count == 0)
             {
                 _alert = Alert.Info("No unread articles found matching current filters.");
                 return;
             }
-            
-            // Update local state for loaded articles
+
             foreach (var article in _articles)
             {
                 article.IsRead = true;
             }
-            
-            // If we are filtering by "Unread", clear the list as they are no longer unread
+
             if (_readFilter == ReadFilter.Unread)
             {
                 _articles.Clear();
@@ -798,13 +517,9 @@ else
             }
             else
             {
-                // Re-sort articles: unread first, then by publish date
-                _articles = _articles
-                    .OrderBy(a => a.IsRead)
-                    .ThenByDescending(a => a.PublishDate)
-                    .ToList();
+                _articles = [.. _articles.OrderBy(a => a.IsRead).ThenByDescending(a => a.PublishDate)];
             }
-            
+
             _alert = Alert.Success($"Marked {count} article(s) as read.");
             Logger.LogInformation("Marked {Count} articles as read", count);
         }
@@ -818,37 +533,31 @@ else
             _isProcessing = false;
         }
     }
-    
+
     private async Task UpdateAllFeeds()
     {
         if (_isProcessing) return;
-        
+
         try
         {
             _isProcessing = true;
             _updateProgress = null;
             _alert = Alert.Info("Updating all feeds...");
-            
+
             var result = await FeedService.UpdateAllFeedsAsync();
-            
+
             _updateProgress = null;
-            
+
             await LoadArticlesAsync();
-            
-            if (result.FailedUpdates == 0)
+
+            _alert = (result.SuccessfulUpdates, result.FailedUpdates) switch
             {
-                _alert = Alert.Success($"All {result.SuccessfulUpdates} feed(s) updated successfully.");
-            }
-            else if (result.SuccessfulUpdates == 0)
-            {
-                _alert = Alert.Error($"Failed to update all {result.FailedUpdates} feed(s). Check logs for details.");
-            }
-            else
-            {
-                _alert = Alert.Warning($"Updated {result.SuccessfulUpdates} feed(s) successfully, but {result.FailedUpdates} feed(s) failed. Check logs for details.");
-            }
-            
-            Logger.LogInformation("Feed update completed: {Success} successful, {Failed} failed", 
+                (_, 0) => Alert.Success($"All {result.SuccessfulUpdates} feed(s) updated successfully."),
+                (0, _) => Alert.Error($"Failed to update all {result.FailedUpdates} feed(s). Check logs for details."),
+                _ => Alert.Warning($"Updated {result.SuccessfulUpdates} feed(s) successfully, but {result.FailedUpdates} feed(s) failed. Check logs for details.")
+            };
+
+            Logger.LogInformation("Feed update completed: {Success} successful, {Failed} failed",
                 result.SuccessfulUpdates, result.FailedUpdates);
         }
         catch (Exception ex)
@@ -866,21 +575,11 @@ else
     public void Dispose()
     {
         _disposed = true;
+        _cts?.Cancel();
+        _cts?.Dispose();
         NotificationService.OnFeedsUpdated -= HandleFeedsUpdated;
         NotificationService.OnCategoriesUpdated -= HandleCategoriesUpdated;
         NotificationService.OnFeedUpdateProgress -= HandleFeedUpdateProgress;
         _debounceTimer?.Dispose();
-    }
-
-    private void OnSearchInput(ChangeEventArgs e)
-    {
-        _titleFilter = e.Value?.ToString() ?? string.Empty;
-        _debounceTimer?.Stop();
-        _debounceTimer?.Start();
-    }
-
-    private string GetFeedFilterUrl(int feedId)
-    {
-        return $"/articles?feedId={feedId}";
     }
 }

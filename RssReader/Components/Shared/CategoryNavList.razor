@@ -21,7 +21,7 @@
 else if (!string.IsNullOrEmpty(errorMessage))
 {
     <div class="nav-item px-3">
-        <div class="alert alert-danger alert-sm mb-2" role="alert">
+        <div class="alert alert-danger py-2 px-3 mb-2" role="alert">
             <small>@errorMessage</small>
             <button class="btn btn-link btn-sm p-0 ms-2 text-white" 
                     @onclick="RetryLoadCategories"
@@ -35,7 +35,7 @@ else if (!string.IsNullOrEmpty(errorMessage))
 else if (allCategories.Any())
 {   
     <div class="nav-item px-3">
-        <div class="text-muted mb-2" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; opacity: 0.6;">
+        <div class="text-muted small text-uppercase fw-semibold mb-2 opacity-50">
             <span>Categories</span>
         </div>
     </div>
@@ -43,31 +43,25 @@ else if (allCategories.Any())
     @foreach (var category in allCategories)
     {
         <div class="nav-item px-3">
-            <div class="nav-category-header d-flex align-items-center">
-                <button class="btn btn-link p-0 border-0 me-2 flex-shrink-0" 
-                        style="font-size: 0.875rem; color: inherit;"
-                        @onclick="() => ToggleCategory(category.Id)"
-                        @onclick:stopPropagation="true"
-                        title="@(expandedCategories.Contains(category.Id) ? "Collapse" : "Expand")"
-                        aria-label="@(expandedCategories.Contains(category.Id) ? $"Collapse category {category.Name}" : $"Expand category {category.Name}")"
-                        aria-expanded="@expandedCategories.Contains(category.Id)">
+            <button class="btn btn-link d-flex align-items-center w-100 p-2 mb-1 border-0 text-start text-decoration-none rounded" 
+                    @onclick="() => ToggleCategory(category.Id)"
+                    aria-expanded="@expandedCategories.Contains(category.Id)"
+                    aria-label="@(expandedCategories.Contains(category.Id) ? $"Collapse category {category.Name}" : $"Expand category {category.Name}")">
+                <span class="me-2 flex-shrink-0 small">
                     @if (loadingCategoryFeeds.Contains(category.Id))
                     {
-                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="width: 0.875rem; height: 0.875rem;"></span>
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                     }
                     else
                     {
-                        <i class="bi bi-chevron-@(expandedCategories.Contains(category.Id) ? "down" : "right") cursor-pointer"></i>
+                        <i class="bi bi-chevron-@(expandedCategories.Contains(category.Id) ? "down" : "right")"></i>
                     }
-                </button>
-                <NavLink class="category-link flex-grow-1 text-decoration-none" 
-                         href="@GetCategoryUrl(category.Id)">
-                    <span class="category-name">
-                        <i class="bi bi-folder-fill me-2" style="font-size: 0.9rem; opacity: 0.8;"></i>
-                        @category.Name
-                    </span>
-                </NavLink>
-            </div>
+                </span>
+                <span class="flex-grow-1 fw-medium">
+                    <i class="bi bi-folder-fill me-2 opacity-75"></i>
+                    @category.Name
+                </span>
+            </button>
 
             @if (expandedCategories.Contains(category.Id))
             {
@@ -75,20 +69,20 @@ else if (allCategories.Any())
                 {
                     @foreach (var feed in feeds)
                     {
-                        <div class="nav-feed-item ps-4">
-                            <NavLink class="nav-link d-flex align-items-center text-truncate" 
+                        <div class="ps-4">
+                            <NavLink class="nav-link d-flex align-items-center text-truncate py-1 px-2 rounded small" 
                                      href="@GetFeedUrl(feed.Id)">
                                 <FeedIcon ImageUrl="@feed.ImageUrl" 
                                           Title="@feed.Title" />
-                                <span class="feed-title text-truncate flex-grow-1" title="@feed.Title">@feed.Title</span>
+                                <span class="text-truncate flex-grow-1" title="@feed.Title">@feed.Title</span>
                             </NavLink>
                         </div>
                     }
                 }
                 else if (!loadingCategoryFeeds.Contains(category.Id))
                 {
-                    <div class="nav-feed-item ps-4">
-                        <small class="text-muted" style="opacity: 0.6;">No feeds in this category</small>
+                    <div class="ps-4">
+                        <small class="text-muted opacity-50">No feeds in this category</small>
                     </div>
                 }
             }
@@ -98,8 +92,8 @@ else if (allCategories.Any())
 else
 {
     <div class="nav-item px-3">
-        <div class="empty-state text-center py-3">
-            <i class="bi bi-inbox d-block mb-2" style="font-size: 2rem; opacity: 0.3;"></i>
+        <div class="text-center py-3 border border-secondary border-opacity-25 rounded" style="border-style: dashed !important;">
+            <i class="bi bi-inbox d-block mb-2 opacity-25" style="font-size: 2rem;"></i>
             <small class="text-muted d-block mb-2">No categories yet.</small>
             <NavLink href="@Constants.Routes.Categories" class="btn btn-sm btn-link">Add Category</NavLink>
         </div>
@@ -305,11 +299,6 @@ else
             expandedCategories.Add(categoryId);
             await LoadCategoryFeedsAsync(categoryId);
         }
-    }
-
-    private string GetCategoryUrl(int categoryId)
-    {
-        return $"{Constants.Routes.Articles}?categoryId={categoryId}";
     }
 
     private string GetFeedUrl(int feedId)

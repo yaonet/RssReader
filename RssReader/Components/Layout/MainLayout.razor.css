@@ -59,6 +59,49 @@ main {
         transform: rotate(45deg) scale(0.95);
     }
 
+    /* Theme switcher styles */
+    .top-row .theme-switcher-btn {
+        color: #333;
+        font-size: 1.25rem;
+        text-decoration: none !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 4px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        transition: all 0.2s ease-in-out;
+    }
+
+    .top-row .theme-switcher-btn::after {
+        display: none;
+    }
+
+    .top-row .theme-switcher-btn:hover {
+        color: #0066cc;
+        background-color: rgba(0, 102, 204, 0.1);
+    }
+
+/* Dark mode overrides */
+[data-bs-theme="dark"] .top-row {
+    background-color: #212529;
+    border-bottom-color: #495057;
+}
+
+[data-bs-theme="dark"] .top-row .settings-link,
+[data-bs-theme="dark"] .top-row .theme-switcher-btn {
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .top-row .settings-link:hover,
+[data-bs-theme="dark"] .top-row .theme-switcher-btn:hover {
+    color: #6ea8fe;
+    background-color: rgba(110, 168, 254, 0.1);
+}
+
 @media (max-width: 640.98px) {
     .top-row {
         justify-content: flex-end;

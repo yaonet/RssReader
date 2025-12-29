@@ -1,0 +1,90 @@
+@rendermode InteractiveServer
+@inject RssReader.Services.ThemeService ThemeService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="dropdown">
+    <button class="btn btn-link theme-switcher-btn dropdown-toggle" 
+            type="button" 
+            data-bs-toggle="dropdown" 
+            aria-expanded="false"
+            title="Theme">
+        <i class="bi @GetThemeIcon()"></i>
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end">
+        <li>
+            <button class="dropdown-item @(ThemeService.CurrentTheme == "light" ? "active" : "")" 
+                    @onclick="@(() => SetTheme("light"))">
+                <i class="bi bi-sun me-2"></i>Light
+            </button>
+        </li>
+        <li>
+            <button class="dropdown-item @(ThemeService.CurrentTheme == "dark" ? "active" : "")" 
+                    @onclick="@(() => SetTheme("dark"))">
+                <i class="bi bi-moon-stars me-2"></i>Dark
+            </button>
+        </li>
+        <li>
+            <button class="dropdown-item @(ThemeService.CurrentTheme == "auto" ? "active" : "")" 
+                    @onclick="@(() => SetTheme("auto"))">
+                <i class="bi bi-circle-half me-2"></i>Auto
+            </button>
+        </li>
+    </ul>
+</div>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Sync service state from localStorage
+            var savedTheme = await JS.InvokeAsync<string?>("getStoredTheme");
+            var theme = savedTheme ?? "auto";
+            
+            if (!ThemeService.IsInitialized)
+            {
+                ThemeService.Initialize(theme);
+                StateHasChanged();
+            }
+            else if (ThemeService.CurrentTheme != theme)
+            {
+                // localStorage and service are out of sync, update service
+                ThemeService.SetTheme(theme);
+                StateHasChanged();
+            }
+            
+            // Always ensure the theme is applied to the DOM
+            await JS.InvokeVoidAsync("setTheme", ThemeService.CurrentTheme);
+            
+            ThemeService.OnThemeChanged += HandleThemeChanged;
+        }
+    }
+
+    private async void HandleThemeChanged()
+    {
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task SetTheme(string theme)
+    {
+        ThemeService.SetTheme(theme);
+        await JS.InvokeVoidAsync("setTheme", theme);
+    }
+
+    private string GetThemeIcon() => ThemeService.CurrentTheme switch
+    {
+        "light" => "bi-sun",
+        "dark" => "bi-moon-stars",
+        _ => "bi-circle-half"
+    };
+
+    public void Dispose()
+    {
+        ThemeService.OnThemeChanged -= HandleThemeChanged;
+    }
+}

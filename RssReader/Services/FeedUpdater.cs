@@ -78,7 +78,7 @@ namespace RssReader.Services
                 "Feed update completed: {Total} total, {Success} successful, {Failed} failed",
                 result.TotalFeeds, result.SuccessfulUpdates, result.FailedUpdates);
 
-            if (result.Errors.Any())
+            if (result.Errors.Count != 0)
             {
                 foreach (var error in result.Errors.Take(10))
                 {
@@ -90,11 +90,6 @@ namespace RssReader.Services
                     _logger.LogWarning("... and {Count} more errors", result.Errors.Count - 10);
                 }
             }
-        }
-
-        public override void Dispose()
-        {
-            base.Dispose();
         }
     }
 }

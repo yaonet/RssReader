@@ -178,7 +178,7 @@ public class ArticleQueryService
                 .Where(k => !string.IsNullOrWhiteSpace(k))
                 .ToList();
 
-            if (keywords.Any())
+            if (keywords.Count != 0)
             {
                 foreach (var keyword in keywords)
                 {

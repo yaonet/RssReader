@@ -3,11 +3,12 @@ using Serilog;
 
 namespace RssReader.Tray;
 
-public class RssReaderService
+public class RssReaderService : IDisposable
 {
     private Process? _process;
     private readonly string _rssReaderPath;
     private readonly string _workingDirectory;
+    private bool _disposed;
 
     public event EventHandler<ServiceStatusChangedEventArgs>? StatusChanged;
 
@@ -135,10 +136,23 @@ public class RssReaderService
 
     public void Dispose()
     {
-        if (_process != null && !_process.HasExited)
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+
+        if (disposing)
         {
-            Stop();
+            if (_process != null && !_process.HasExited)
+            {
+                Stop();
+            }
         }
+
+        _disposed = true;
     }
 }
 

@@ -1,0 +1,53 @@
+@using RssReader.ViewModels
+
+@if (IsLoadingMore)
+{
+    <div class="text-center my-4">
+        <div class="spinner-border spinner-border-sm" role="status">
+            <span class="visually-hidden">Loading more articles...</span>
+        </div>
+        <div class="text-muted small mt-2">Loading more articles...</div>
+    </div>
+}
+else if (HasMore)
+{
+    <div class="text-center my-4">
+        <button type="button" 
+                class="btn btn-outline-primary"
+                @onclick="OnLoadMore"
+                disabled="@IsDisabled">
+            <i class="bi bi-arrow-down-circle me-2"></i>Load More Articles
+        </button>
+        <div class="text-muted small mt-2">
+            Currently showing @CurrentCount articles
+        </div>
+    </div>
+}
+else if (CurrentCount >= MinCountToShowTotal)
+{
+    <div class="text-center my-4">
+        <div class="text-muted small">
+            <i class="bi bi-check-circle me-1"></i>All articles loaded (@CurrentCount total)
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public bool HasMore { get; set; }
+
+    [Parameter]
+    public bool IsLoadingMore { get; set; }
+
+    [Parameter]
+    public bool IsDisabled { get; set; }
+
+    [Parameter]
+    public int CurrentCount { get; set; }
+
+    [Parameter]
+    public int MinCountToShowTotal { get; set; } = 100;
+
+    [Parameter]
+    public EventCallback OnLoadMore { get; set; }
+}

@@ -1,7 +1,6 @@
 using System.Xml;
 using System.Xml.Linq;
 using System.Text;
-using RssReader.Models;
 using Microsoft.EntityFrameworkCore;
 using RssReader.Data;
 

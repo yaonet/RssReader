@@ -1,6 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
-
-namespace RssReader.Models
+﻿namespace RssReader.Models
 {
     public class Article
     {
